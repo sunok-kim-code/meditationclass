@@ -45,6 +45,9 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 .slot .ld{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;color:#d6dbd3}
 #empty{position:fixed;left:50%;transform:translateX(-50%);width:max-content;max-width:86%;text-align:center;white-space:pre-line;font-size:13px;line-height:1.6;color:#e6e9e2;padding:10px 14px;border-radius:14px;background:rgba(13,17,16,.5)}
 #bar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding-top:8px}
+#asks{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding-top:8px}
+#asks .chip{background:rgba(13,17,16,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+#asks .chip[aria-pressed="true"]{background:#e9e2cf;color:#17201b;border-color:#e9e2cf}
 .btn{min-height:44px;padding:0 15px;border-radius:999px;border:1px solid rgba(255,255,255,.28);background:rgba(13,17,16,.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:14px}
 .btn[aria-pressed="true"]{background:#e9e2cf;color:#17201b;border-color:#e9e2cf;font-weight:600}
 .btn.danger{border-color:rgba(255,160,146,.6);color:#ffc9bf}
@@ -85,6 +88,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 <canvas id="gl"></canvas>
 <video id="cam" muted playsinline hidden></video>
 <audio id="hostAudio" autoplay playsinline></audio>
+<audio id="talkAudio" autoplay playsinline></audio>
 
 <div id="room" hidden>
   <div id="top">
@@ -93,6 +97,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
     <span class="pill" id="status" role="status"></span>
   </div>
   <div id="stage"></div>
+  <div id="asks" hidden></div>
   <div id="bar"></div>
 </div>
 
@@ -608,7 +613,7 @@ async function makeAvatar(defId) {
 }
 
 /* ---------- 상태 ---------- */
-const S = { role: null, code: '', myId: null, name: '', avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)].id, bg: BGS[0].id, peer: null, hostConn: null, conns: new Map(), calls: new Map(), mic: null, micOn: true, bowl: false, camOn: false, away: false, awayOn: true, ended: false };
+const S = { role: null, code: '', myId: null, name: '', avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)].id, bg: BGS[0].id, peer: null, hostConn: null, conns: new Map(), calls: new Map(), mic: null, micOn: true, bowl: false, camOn: false, away: false, awayOn: true, ended: false, talker: null, asking: false, myMic: null, talkCall: null, talkStream: null, relays: new Map() };
 const members = new Map(); // id -> { id, name, avatar, host, away, slot, inst, st, t0, seat, cur, pose, target, lastSeen }
 let order = [];            // 자리 순서(진행자 먼저)
 const ghosts = [];         // 나간 뒤 걸어 나가는 중인 사람
@@ -619,7 +624,7 @@ function newPose() { return { blend: {}, quat: new THREE.Quaternion(), euler: ne
 // walkIn: 걸어 들어와 앉는 장면을 보여줄지 (이미 앉아 있던 사람은 false)
 function addMember(m, walkIn) {
   if (members.has(m.id)) return members.get(m.id);
-  const mem = { id: m.id, name: m.name, avatar: m.avatar, host: !!m.host, away: !!m.away, slot: null, inst: null, token: 0, st: m.away ? 'gone' : walkIn ? 'wait' : 'seated', t0: 0, seat: null, cur: null, pose: newPose(), target: { blend: {}, quat: new THREE.Quaternion(), lean: new THREE.Vector2(), g: 0, hl: null, hr: null }, lastSeen: 0 };
+  const mem = { id: m.id, name: m.name, avatar: m.avatar, host: !!m.host, away: !!m.away, ask: !!m.ask, talk: !!m.talk, slot: null, inst: null, token: 0, st: m.away ? 'gone' : walkIn ? 'wait' : 'seated', t0: 0, seat: null, cur: null, pose: newPose(), target: { blend: {}, quat: new THREE.Quaternion(), lean: new THREE.Vector2(), g: 0, hl: null, hr: null }, lastSeen: 0 };
   members.set(mem.id, mem);
   loadInst(mem);
   layout();
@@ -659,7 +664,7 @@ function label(mem) {
   if (!mem.slot) return;
   const nm = mem.slot.querySelector('.nm'); if (!nm) return;
   const base = mem.host ? `진행자 · ${mem.name}` : mem.name;
-  nm.textContent = base + (mem.id === S.myId ? ' (나)' : '') + (mem.away ? ' · 자리 비움' : '');
+  nm.textContent = base + (mem.id === S.myId ? ' (나)' : '') + (mem.talk ? ' · 말하는 중' : mem.ask ? ' · 발언 요청' : '') + (mem.away ? ' · 자리 비움' : '');
   nm.style.opacity = mem.away ? '0.75' : mem.st === 'entering' || mem.st === 'wait' || mem.st === 'leaving' ? '0' : '1';
 }
 
@@ -854,8 +859,66 @@ async function getIce() {
 }
 const hostPeerId = (code) => PREFIX + code.toLowerCase() + '-host';
 const newCode = () => Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
-const roster = () => [...members.values()].map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, host: m.host, away: m.away }));
+const roster = () => [...members.values()].map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, host: m.host, away: m.away, ask: !!m.ask, talk: !!m.talk }));
 const cast = (msg, except) => { for (const [id, c] of S.conns) if (id !== except && c.open) c.send(msg); };
+/* ---------- 발언권: 참가자가 요청하면 진행자가 허용한다 (한 번에 한 사람) ---------- */
+// 허용된 참가자의 목소리는 진행자에게 가고, 진행자가 다른 참가자들에게 그대로 전해 준다
+function markTalk(id, key, v) { const mem = members.get(id); if (mem) { mem[key] = !!v; label(mem); } }
+function playTalk(stream) { const a = $('#talkAudio'); a.srcObject = stream; if (stream) a.play().catch(() => { if (S.role !== 'host') $('#unmute').hidden = false; }); }
+function stopMyMic() { S.talkCall?.close(); S.talkCall = null; S.myMic?.getTracks().forEach((t) => t.stop()); S.myMic = null; S.asking = false; }
+// 참가자: 발언 요청 / 요청 취소 / 발언 마치기
+async function askTalk() {
+  const hc = S.hostConn; if (!hc || !hc.open) { say('진행자와 연결된 뒤에 요청할 수 있습니다', true); return; }
+  if (S.talker === S.myId) { hc.send({ t: 'done' }); return; }
+  if (S.asking) { stopMyMic(); hc.send({ t: 'ask', v: false }); say('발언 요청을 취소했습니다'); toBar(); return; }
+  try { S.myMic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); S.myMic.getAudioTracks().forEach((t) => { t.enabled = false; }); } // 허용되기 전까지 마이크는 꺼 둔다
+  catch (e) { console.warn(e); say('마이크를 쓸 수 없습니다. 브라우저 설정에서 허용해 주세요.', true); return; }
+  S.asking = true; hc.send({ t: 'ask', v: true }); say('발언을 요청했습니다 · 진행자가 허용하면 마이크가 켜집니다'); toBar();
+}
+// 참가자: 누가 말하는지 바뀌었을 때
+async function onTalk(id, v) {
+  markTalk(id, 'talk', v); if (v) markTalk(id, 'ask', false);
+  S.talker = v ? id : S.talker === id ? null : S.talker;
+  if (!v) playTalk(null);
+  if (id !== S.myId) return;
+  if (v) {
+    try {
+      if (!S.myMic) S.myMic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+      S.myMic.getAudioTracks().forEach((t) => { t.enabled = true; }); S.asking = false;
+      S.talkCall = S.peer.call(S.hostConn.peer, S.myMic, { metadata: { kind: 'talk' } });
+      say('지금 말씀하실 수 있습니다 · 마이크 켜짐');
+    } catch (e) { console.warn(e); stopMyMic(); S.hostConn?.send({ t: 'done' }); say('마이크를 쓸 수 없어 발언을 시작하지 못했습니다', true); }
+  } else { stopMyMic(); say('발언을 마쳤습니다 · 마이크 꺼짐'); }
+  toBar();
+}
+// 진행자: 발언자를 정한다 (null이면 끝내기)
+function setTalker(id) {
+  const old = S.talker; if (old === id) return;
+  if (old) {
+    cast({ t: 'talk', id: old, v: false }); markTalk(old, 'talk', false);
+    S.talkCall?.close(); S.talkCall = null; for (const c of S.relays.values()) c.close(); S.relays.clear(); S.talkStream = null; playTalk(null);
+  }
+  S.talker = id && S.conns.has(id) ? id : null;
+  if (S.talker) { markTalk(id, 'ask', false); cast({ t: 'talk', id, v: true }); markTalk(id, 'talk', true); say(`${members.get(id)?.name || '참가자'} 님에게 발언권을 주었습니다`); }
+  else if (old) hostStatus();
+  renderAsks();
+}
+function relayTo(gid) { if (!S.talkStream || gid === S.talker) return; S.relays.get(gid)?.close(); S.relays.set(gid, S.peer.call(gid, S.talkStream, { metadata: { kind: 'relay' } })); }
+function onTalkCall(call) {
+  if (call.peer !== S.talker) { try { call.close(); } catch (e) { /* 무시 */ } return; } // 허용하지 않은 사람의 목소리는 받지 않는다
+  S.talkCall = call; call.answer();
+  call.on('stream', (st) => { if (S.talker !== call.peer) return; S.talkStream = st; playTalk(st); for (const [gid, c] of S.conns) if (c.open) relayTo(gid); });
+}
+// 진행자 화면: 요청한 사람과 말하는 사람을 버튼으로 보여 준다
+function renderAsks() {
+  const box = $('#asks'); box.replaceChildren();
+  if (S.role === 'host') {
+    const t = S.talker && members.get(S.talker);
+    if (t) { const b = el('button', 'chip', `말하는 중: ${t.name} · 발언 끝내기`); b.type = 'button'; b.setAttribute('aria-pressed', 'true'); b.addEventListener('click', () => setTalker(null)); box.append(b); }
+    for (const m of members.values()) if (m.ask && m.id !== S.talker) { const b = el('button', 'chip', `${m.name} · 발언 허용`); b.type = 'button'; b.addEventListener('click', () => setTalker(m.id)); box.append(b); }
+  }
+  box.hidden = !box.childElementCount; place();
+}
 const micConstraints = () => ({ audio: S.bowl ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
 
 // 진행자가 창을 닫았다 다시 열어도 같은 코드로 이어갈 수 있게, 열어 둔 수업을 이 기기에 기억해 둔다
@@ -877,6 +940,7 @@ function openHost(fixed, tries = 0) {
       else reject(err);
     });
     peer.on('disconnected', () => { if (!S.ended) { say('연결 서버에 다시 붙는 중… 그동안 새 참가자는 들어올 수 없습니다', true); relink(); } });
+    peer.on('call', onTalkCall);
     peer.on('connection', (conn) => {
       if (!S.conns.has(conn.peer)) { say('참가 요청을 받았습니다. 연결하는 중…'); setTimeout(() => { if (!S.ended && S.peer && !S.peer.disconnected) hostStatus(); }, 6000); }
       conn.on('data', (msg) => onHostData(conn, msg));
@@ -897,7 +961,9 @@ const seen = new Map(); let hbTick = performance.now();
 function dropGuest(id) {
   const c = S.conns.get(id); if (!c) return;
   S.conns.delete(id); seen.delete(id); try { c.close(); } catch (e) { /* 무시 */ }
-  S.calls.get(id)?.close(); S.calls.delete(id); removeMember(id); cast({ t: 'leave', id });
+  S.calls.get(id)?.close(); S.calls.delete(id); S.relays.get(id)?.close(); S.relays.delete(id);
+  if (S.talker === id) setTalker(null);
+  removeMember(id); cast({ t: 'leave', id }); renderAsks();
 }
 setInterval(() => {
   if (S.role !== 'host' || !S.peer || S.ended) return;
@@ -915,6 +981,7 @@ function onHostData(conn, msg) {
     const m = { id, name: String(msg.name || '참가자').slice(0, 12), avatar: knownAvatar(msg.avatar) ? msg.avatar : AVATARS[0].id, host: false };
     // 같은 사람이 끊겼다 다시 붙은 경우: 자리는 그대로 두고 연결만 새것으로 바꾼다
     const old = S.conns.get(id), back = members.has(id);
+    if (S.talker === id) setTalker(null); // 말하던 사람이 끊겼다 다시 붙으면 발언은 끝난 것으로 본다
     S.conns.set(id, conn);
     if (old && old !== conn) { try { old.close(); } catch (e) { /* 무시 */ } }
     S.calls.get(id)?.close(); S.calls.delete(id);
@@ -922,11 +989,14 @@ function onHostData(conn, msg) {
     for (const cid of new Set(roster().map((x) => x.avatar).filter((a) => isCustomId(a) && a !== m.avatar))) sendCustom(conn, cid); // 지금 방에 있는 사진 아바타 그림을 새로 온 사람에게 보낸다
     if (!back) { addMember(m, true); cast({ t: 'join', m }, id); }
     if (S.mic) S.calls.set(id, S.peer.call(id, S.mic));
+    relayTo(id); // 누가 말하는 중이면 그 목소리도 들려준다
   } else if (!S.conns.has(id)) return;
   else if (msg.t === 'p' && Array.isArray(msg.k)) { const mem = members.get(id); if (mem) { applyPacket(mem, msg.k, false); mem.raw = msg.k; } }
   else if (msg.t === 'avatar' && knownAvatar(msg.avatar)) { setAvatar(id, msg.avatar); cast({ t: 'avatar', id, avatar: msg.avatar }); }
   else if (msg.t === 'cf' || msg.t === 'cd') { const got = recvCustom(msg); if (got) for (const [pid, c] of S.conns) if (pid !== id) sendCustom(c, got); } // 참가자가 보낸 사진 아바타 그림을 받아 다른 참가자에게 전한다
   else if (msg.t === 'away') { const v = !!msg.v && S.awayOn; setAway(id, v); cast({ t: 'away', id, v }, id); }
+  else if (msg.t === 'ask') { const v = !!msg.v && S.talker !== id; markTalk(id, 'ask', v); cast({ t: 'ask', id, v }, id); renderAsks(); if (v) say(`${members.get(id)?.name || '참가자'} 님이 발언을 요청했습니다`); }
+  else if (msg.t === 'done') { if (S.talker === id) setTalker(null); }
 }
 function clearMembers() {
   for (const m of members.values()) { m.token++; m.inst?.dispose(); }
@@ -974,7 +1044,7 @@ function joinRoom(code) {
     const lost = () => {
       if (!S.hostConn) return;
       S.hostConn = null;
-      $('#hostAudio').srcObject = null;
+      $('#hostAudio').srcObject = null; playTalk(null); stopMyMic(); S.talker = null; toBar();
       say('진행자와 연결이 끊겼습니다. 진행자가 돌아오면 자동으로 다시 연결됩니다', true);
       again(1500);
     };
@@ -990,6 +1060,8 @@ function joinRoom(code) {
         if (!first) clearMembers();
         setBg(msg.bg);
         for (const m of msg.members || []) addMember(m, first && m.id === peer.id);
+        S.talker = (msg.members || []).find((m) => m.talk)?.id || null; if (S.talker !== S.myId && (S.myMic || S.asking)) stopMyMic(); // 다시 붙으면 요청·발언은 처음부터
+        toBar();
         if (isCustomId(S.avatar)) sendCustom(from, S.avatar); // 내 사진 아바타 그림을 진행자에게 보낸다 (진행자가 다른 참가자에게 전한다)
         if (first) { joined = true; resolve(); } else { rejoinAt = performance.now(); if (S.away) from.send({ t: 'away', v: true }); say('진행자와 다시 연결됐습니다'); }
       }
@@ -1000,6 +1072,8 @@ function joinRoom(code) {
       else if (msg.t === 'cf' || msg.t === 'cd') recvCustom(msg);
       else if (msg.t === 'away') { if (msg.id !== S.myId) setAway(msg.id, !!msg.v); }
       else if (msg.t === 'bg') setBg(msg.bg);
+      else if (msg.t === 'ask') markTalk(msg.id, 'ask', msg.v);
+      else if (msg.t === 'talk') onTalk(msg.id, !!msg.v);
       else if (msg.t === 'cfg') { S.awayOn = msg.awayOn !== false; if (!S.awayOn) { lastFace = performance.now(); iAmAway(false); } }
       else if (msg.t === 'ps') { for (const pid in msg.a) { if (pid === S.myId) continue; const mem = members.get(pid); if (mem) applyPacket(mem, msg.a[pid], false); } }
       else if (msg.t === 'end') endClass('진행자가 수업을 마쳤습니다. 함께해 주셔서 고맙습니다.');
@@ -1020,7 +1094,7 @@ function joinRoom(code) {
       if (!joined) giveUp(`연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요. (${err.type})`);
     });
     peer.on('disconnected', () => { if (alive() && !peer.destroyed) { try { peer.reconnect(); } catch (e) { /* 무시 */ } } });
-    peer.on('call', (call) => { call.answer(); call.on('stream', playHost); });
+    peer.on('call', (call) => { call.answer(); call.on('stream', (st) => (call.metadata && call.metadata.kind === 'relay' ? playTalk(st) : playHost(st))); });
     peer.on('open', () => { if (!attempt) knock(); });
   });
 }
@@ -1028,7 +1102,7 @@ function playHost(stream) {
   const a = $('#hostAudio'); a.srcObject = stream;
   a.play().then(() => { $('#unmute').hidden = true; if (!S.away) say('진행자 목소리 연결됨'); }).catch(() => { $('#unmute').hidden = false; });
 }
-$('#unmute').addEventListener('click', () => { $('#hostAudio').play().then(() => { $('#unmute').hidden = true; say('진행자 목소리 연결됨'); }).catch(() => {}); });
+$('#unmute').addEventListener('click', () => { if ($('#talkAudio').srcObject) $('#talkAudio').play().catch(() => {}); $('#hostAudio').play().then(() => { $('#unmute').hidden = true; say('진행자 목소리 연결됨'); }).catch(() => {}); });
 
 let lastSend = 0;
 function netTick(now) {
@@ -1058,6 +1132,7 @@ function toBar() {
   if (S.role === 'host') add(S.micOn ? '마이크 켜짐' : '마이크 꺼짐', S.micOn, toggleMic);
   add(S.camOn ? '카메라 켜짐' : '카메라 꺼짐', S.camOn, toggleCam);
   add('아바타', null, () => openSheet('avatar'));
+  if (S.role === 'join') add(S.talker === S.myId ? '발언 마치기' : S.asking ? '요청 취소' : '발언 요청', S.talker === S.myId || S.asking, askTalk);
   if (S.role === 'host') { add('배경·소리', null, () => openSheet('host')); add('초대', null, invite); }
   add(S.role === 'host' ? '수업 종료' : '나가기', null, leave, 'danger');
   place();
@@ -1243,7 +1318,7 @@ function leave() {
 }
 function endClass(msg) {
   if (S.ended) return; S.ended = true;
-  stopCamera(); S.mic?.getTracks().forEach((t) => t.stop());
+  stopCamera(); S.mic?.getTracks().forEach((t) => t.stop()); S.myMic?.getTracks().forEach((t) => t.stop());
   try { S.peer?.destroy(); } catch (e) { /* 무시 */ }
   wake?.release?.().catch(() => {});
   $('#sheet').hidden = true; $('#unmute').hidden = true;
@@ -1368,7 +1443,7 @@ function tick() {
 }
 
 /* ---------- 시작 ---------- */
-window.__cls = { S, members, addMember, removeMember, setAway, setAvatar, setMyPacket, enc, CUSTOM, createCustom, pickAvatar };
+window.__cls = { S, members, addMember, removeMember, setAway, setAvatar, setMyPacket, enc, CUSTOM, createCustom, pickAvatar, askTalk, setTalker };
 try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; const av = localStorage.getItem('medclass-avatar'); if (AVATARS.some((a) => a.id === av)) S.avatar = av; } catch (e) { /* 무시 */ }
 loadMine().then((ok) => { if (!ok) return; try { if (localStorage.getItem('medclass-avatar') === S.mine && !S.myId) S.avatar = S.mine; } catch (e) { /* 무시 */ } avatarRow($('#lobbyAv'), lobbyPick); });
 const lobbyPick = (id) => { pickAvatar(id); avatarRow($('#lobbyAv'), lobbyPick); };
