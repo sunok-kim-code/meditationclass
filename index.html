@@ -3,36 +3,62 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>아바타 테스트</title>
+<title>명상 클래스</title>
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:#0d1110;color:#f3f1ea;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;overflow:hidden}
-#stage{position:fixed;inset:0}
-#bgImg,#bgVid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-#bgVid{display:none}
-#gl{position:absolute;inset:0;width:100%;height:100%;display:block}
-#gl.mirror{transform:scaleX(-1)}
-#pip{position:absolute;top:calc(12px + env(safe-area-inset-top));right:12px;width:84px;height:112px;object-fit:cover;border-radius:12px;border:1px solid rgba(255,255,255,.35);transform:scaleX(-1);background:#000;display:none}
-#status{position:absolute;top:calc(12px + env(safe-area-inset-top));left:12px;max-width:62%;padding:7px 11px;border-radius:999px;background:rgba(13,17,16,.62);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:12.5px;line-height:1.35}
-#status.err{background:rgba(120,30,24,.85);border-radius:12px}
-#panel{position:absolute;left:0;right:0;bottom:0;padding:12px 12px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to top,rgba(13,17,16,.88) 62%,rgba(13,17,16,0));transition:transform .25s}
-#panel.hide{transform:translateY(100%)}
-.row{display:flex;gap:8px;overflow-x:auto;padding:4px 0 8px;scrollbar-width:none}
+button,input{font:inherit;color:inherit}
+button:focus-visible,input:focus-visible{outline:2px solid #fff;outline-offset:2px}
+[hidden]{display:none!important}
+#bg{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
+#shade{position:fixed;inset:0;background:linear-gradient(to bottom,rgba(13,17,16,.25),rgba(13,17,16,0) 22%,rgba(13,17,16,0) 55%,rgba(13,17,16,.7))}
+#gl{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
+
+/* 로비 */
+#lobby{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(13,17,16,.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);overflow:auto}
+.card{width:100%;max-width:380px;padding:22px;border-radius:22px;background:rgba(19,26,23,.88);border:1px solid rgba(255,255,255,.12)}
+.card h1{margin:0 0 4px;font-size:24px;font-weight:600}
+.card p.sub{margin:0 0 18px;font-size:13.5px;line-height:1.55;color:#c3cbc2}
+.tabs{display:flex;gap:6px;padding:4px;border-radius:999px;background:rgba(255,255,255,.07);margin-bottom:16px}
+.tabs button{flex:1;min-height:40px;border:0;border-radius:999px;background:transparent;font-size:14.5px}
+.tabs button[aria-selected="true"]{background:#e9e2cf;color:#17201b;font-weight:600}
+label.f{display:block;font-size:12.5px;color:#b9c2b8;margin:12px 2px 6px}
+input.t{width:100%;min-height:48px;padding:0 14px;border-radius:12px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.06);font-size:16px}
+input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
+.primary{width:100%;min-height:52px;margin-top:18px;border:0;border-radius:999px;background:#e9e2cf;color:#17201b;font-size:16px;font-weight:600}
+.primary:disabled{opacity:.6}
+.note{margin:12px 2px 0;font-size:12px;line-height:1.5;color:#aab3a9}
+.err{margin:12px 2px 0;font-size:13px;line-height:1.5;color:#ffb4a8}
+
+/* 수업방 */
+#room{position:fixed;inset:0;display:flex;flex-direction:column;padding:calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom))}
+#top{display:flex;align-items:center;gap:8px;min-height:36px}
+.pill{padding:7px 12px;border-radius:999px;background:rgba(13,17,16,.62);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:12.5px;line-height:1.3;white-space:nowrap}
+#status{white-space:normal;margin-left:auto;text-align:right;max-width:58%}
+#status.bad{background:rgba(120,30,24,.85)}
+#hostSlot{flex:1.25;min-height:0;position:relative}
+#grid{flex:1;min-height:0;display:grid;gap:4px;grid-auto-rows:1fr}
+.slot{position:relative;min-width:0;min-height:0}
+.slot .nm{position:absolute;left:50%;bottom:2px;transform:translateX(-50%);max-width:96%;padding:3px 9px;border-radius:999px;background:rgba(13,17,16,.6);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#hostSlot .nm{font-size:13px;padding:5px 12px}
+.slot .ld{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#d6dbd3}
+#empty{align-self:center;justify-self:center;text-align:center;font-size:13px;line-height:1.6;color:#e6e9e2;padding:10px 14px;border-radius:14px;background:rgba(13,17,16,.5)}
+#bar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding-top:8px}
+.btn{min-height:44px;padding:0 15px;border-radius:999px;border:1px solid rgba(255,255,255,.28);background:rgba(13,17,16,.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:14px}
+.btn[aria-pressed="true"]{background:#e9e2cf;color:#17201b;border-color:#e9e2cf;font-weight:600}
+.btn.danger{border-color:rgba(255,160,146,.6);color:#ffc9bf}
+#sheet{position:fixed;left:0;right:0;bottom:0;padding:16px 14px calc(16px + env(safe-area-inset-bottom));border-radius:20px 20px 0 0;background:rgba(19,26,23,.96);border-top:1px solid rgba(255,255,255,.14)}
+#sheet h2{margin:0 0 10px;font-size:15px;font-weight:600}
+.row{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none}
 .row::-webkit-scrollbar{display:none}
-.lbl{font-size:11.5px;letter-spacing:.04em;color:#b9c2b8;margin:4px 2px 0}
-.chip{flex:0 0 auto;min-height:44px;padding:0 15px;border-radius:999px;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.07);color:inherit;font:inherit;font-size:14px}
+.chip{flex:0 0 auto;min-height:44px;padding:0 15px;border-radius:999px;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.07);font-size:14px}
 .chip[aria-pressed="true"]{background:#e9e2cf;color:#17201b;border-color:#e9e2cf;font-weight:600}
-.thumb{flex:0 0 auto;width:54px;height:54px;border-radius:12px;border:2px solid transparent;background-size:cover;background-position:center;padding:0}
+.thumb{flex:0 0 auto;width:60px;height:60px;border-radius:12px;border:2px solid transparent;background-size:cover;background-position:center;padding:0}
 .thumb[aria-pressed="true"]{border-color:#e9e2cf}
-.thumb.up{border:1px dashed rgba(255,255,255,.5);background:rgba(255,255,255,.07);color:inherit;font-size:22px}
-#toggle{position:absolute;right:12px;bottom:calc(100% + 8px);min-height:36px;padding:0 12px;border-radius:999px;border:0;background:rgba(13,17,16,.62);color:inherit;font:inherit;font-size:12.5px}
-#panel.hide #toggle{bottom:calc(100% + 12px + env(safe-area-inset-bottom))}
-#start{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:rgba(13,17,16,.55);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
-#start h1{margin:0;font-size:22px;font-weight:600}
-#start p{margin:0;max-width:30ch;font-size:14px;line-height:1.55;color:#d6dbd3}
-#go{min-height:52px;padding:0 26px;border-radius:999px;border:0;background:#e9e2cf;color:#17201b;font:inherit;font-size:16px;font-weight:600}
-#go:disabled{opacity:.6}
-button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+#over{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:rgba(13,17,16,.8)}
+#over p{margin:0;max-width:30ch;font-size:15px;line-height:1.6}
+#over button{min-height:48px;padding:0 24px;border:0;border-radius:999px;background:#e9e2cf;color:#17201b;font-weight:600}
+#unmute{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);min-height:52px;padding:0 24px;border:0;border-radius:999px;background:#e9e2cf;color:#17201b;font-size:16px;font-weight:600}
 </style>
 <script type="importmap">
 {"imports":{
@@ -41,308 +67,506 @@ button:focus-visible{outline:2px solid #fff;outline-offset:2px}
 "@pixiv/three-vrm":"https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3/lib/three-vrm.module.min.js"
 }}
 </script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
-<div id="stage">
-  <img id="bgImg" alt="">
-  <video id="bgVid" muted loop playsinline></video>
-  <canvas id="gl" class="mirror"></canvas>
-  <video id="pip" muted playsinline></video>
-  <div id="status" role="status">아바타 불러오는 중…</div>
+<img id="bg" alt="">
+<div id="shade"></div>
+<canvas id="gl"></canvas>
+<video id="cam" muted playsinline hidden></video>
+<audio id="hostAudio" autoplay playsinline></audio>
 
-  <div id="panel">
-    <button id="toggle" type="button">메뉴 숨기기</button>
-    <div class="lbl">아바타</div>
-    <div class="row" id="avatars"></div>
-    <div class="lbl">배경</div>
-    <div class="row" id="bgs"></div>
-    <div class="row" style="padding-bottom:0">
-      <button class="chip" id="mirrorBtn" type="button" aria-pressed="true">거울 보기</button>
-      <button class="chip" id="pipBtn" type="button" aria-pressed="false">내 카메라 보기</button>
-    </div>
-    <input id="file" type="file" accept="image/*,video/*" hidden>
+<div id="room" hidden>
+  <div id="top">
+    <span class="pill" id="codePill"></span>
+    <span class="pill" id="countPill"></span>
+    <span class="pill" id="status" role="status"></span>
   </div>
+  <div id="hostSlot" class="slot"></div>
+  <div id="grid"></div>
+  <div id="bar"></div>
+</div>
 
-  <div id="start">
-    <h1>아바타 테스트</h1>
-    <p>카메라가 표정과 고개 움직임을 읽어 아바타가 따라 움직입니다. 카메라 영상은 이 기기 밖으로 전송되지 않습니다.</p>
-    <button id="go" type="button">카메라 켜고 시작</button>
+<div id="sheet" hidden></div>
+<button id="unmute" type="button" hidden>소리 켜기</button>
+
+<div id="lobby">
+  <div class="card">
+    <h1>명상 클래스</h1>
+    <p class="sub">진행자의 목소리를 들으며 아바타로 함께 앉습니다. 카메라 영상은 전송되지 않고, 표정과 고개 움직임 수치만 오갑니다.</p>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" id="tabJoin" aria-selected="true">참가하기</button>
+      <button type="button" role="tab" id="tabHost" aria-selected="false">수업 열기</button>
+    </div>
+    <label class="f" for="name">이름</label>
+    <input class="t" id="name" maxlength="12" autocomplete="nickname" placeholder="수업에서 보일 이름">
+    <div id="codeWrap">
+      <label class="f" for="code">수업 코드</label>
+      <input class="t code" id="code" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="ABC123">
+    </div>
+    <button class="primary" id="enter" type="button">참가하기</button>
+    <p class="note" id="lobbyNote">입장할 때 카메라 사용을 묻습니다. 허용하지 않아도 참가할 수 있고, 그 경우 아바타는 가만히 앉아 있습니다.</p>
+    <p class="err" id="lobbyErr" role="alert" hidden></p>
   </div>
 </div>
+
+<div id="over" hidden><p id="overMsg"></p><button type="button" id="overBtn">처음으로</button></div>
 
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
 const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
 const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-const BASIS = 'https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/libs/basis/';
-
 const AVATARS = [
-  { id: 'a', label: '캐릭터 A', type: 'vrm', url: 'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@v0.6.11/packages/three-vrm/examples/models/three-vrm-girl.vrm' },
-  { id: 'b', label: '캐릭터 B', type: 'vrm', url: 'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@dev/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm' },
-  { id: 'r', label: '사실적 3D', type: 'human', url: 'https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@main/avatars/brunette.glb' },
+  { id: 'a', label: '캐릭터 A', url: 'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@v0.6.11/packages/three-vrm/examples/models/three-vrm-girl.vrm' },
+  { id: 'b', label: '캐릭터 B', url: 'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@dev/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm' },
 ];
-const BGS = [
-  { id: 28, label: '숲 계곡' }, { id: 16, label: '호수' }, { id: 10, label: '숲과 바다' }, { id: 1043, label: '산과 강' },
-];
+const BGS = [{ id: 28, label: '숲 계곡' }, { id: 16, label: '호수' }, { id: 10, label: '숲과 바다' }, { id: 1043, label: '산과 강' }];
 const bgUrl = (id, w, h) => `https://picsum.photos/id/${id}/${w}/${h}`;
-
+const KEYS = ['eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen', 'mouthFunnel', 'mouthPucker', 'mouthSmileLeft', 'mouthSmileRight'];
+const MAX_GUESTS = 12, SEND_MS = 85, PREFIX = 'sunmedclass-';
 const $ = (s) => document.querySelector(s);
-const statusEl = $('#status');
-const say = (t, err) => { statusEl.textContent = t; statusEl.classList.toggle('err', !!err); };
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
 /* ---------- 3D ---------- */
 const canvas = $('#gl');
 const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setScissorTest(true);
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(24, 1, 0.05, 20);
+const camera = new THREE.PerspectiveCamera(24, 1, 0.05, 30);
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.7;
-const sun = new THREE.DirectionalLight(0xfff4e2, 1.6); sun.position.set(0.6, 1.2, 1.4); scene.add(sun);
+const sun = new THREE.DirectionalLight(0xfff4e2, 1.6); sun.position.set(0.6, 1.4, 1.4); scene.add(sun);
 scene.add(new THREE.HemisphereLight(0xdfeaf2, 0x39422f, 0.9));
-
+THREE.Cache.enabled = true;
 const loader = new GLTFLoader();
-loader.setKTX2Loader(new KTX2Loader().setTranscoderPath(BASIS).detectSupport(renderer));
-loader.setMeshoptDecoder(MeshoptDecoder);
 loader.register((p) => new VRMLoaderPlugin(p));
 
+const shadowTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d'), r = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+  r.addColorStop(0, 'rgba(0,0,0,.5)'); r.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+})();
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
-const cache = new Map();
-let current = null;
+const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1);
 
-function makeVrm(gltf) {
+// 앉은 명상 자세 (반가부좌에 가까운 형태, 손은 무릎 위)
+const POSE = { hipFlex: -1.5, hipOut: 0.95, hipTwist: 1.2, knee: 2.45, foot: -0.5, armZ: -1.12, armFwd: -0.42, elbow: -0.55, wrist: 0.2 };
+function sit(vrm, s) {
+  const bone = (n) => vrm.humanoid.getNormalizedBoneNode(n);
+  const q = (ax, a) => new THREE.Quaternion().setFromAxisAngle(ax, a);
+  const qx = (a) => q(AX, a * s), qy = (a) => q(AY, a), qz = (a) => q(AZ, a * s);
+  for (const [side, k] of [['left', 1], ['right', -1]]) {
+    const ul = bone(side + 'UpperLeg'), ll = bone(side + 'LowerLeg'), ft = bone(side + 'Foot');
+    const ua = bone(side + 'UpperArm'), la = bone(side + 'LowerArm'), hd = bone(side + 'Hand');
+    if (ul) ul.quaternion.copy(qy(k * POSE.hipOut)).multiply(qx(POSE.hipFlex)).multiply(qy(k * POSE.hipTwist));
+    if (ll) ll.quaternion.copy(qx(POSE.knee));
+    if (ft) ft.quaternion.copy(qx(POSE.foot));
+    if (ua) ua.quaternion.copy(qy(k * POSE.armFwd)).multiply(qz(k * POSE.armZ));
+    if (la) la.quaternion.copy(qy(k * POSE.elbow));
+    if (hd) hd.quaternion.copy(qz(k * POSE.wrist));
+  }
+}
+
+async function makeAvatar(defId) {
+  const def = AVATARS.find((a) => a.id === defId) || AVATARS[0];
+  const gltf = await loader.loadAsync(def.url);
   const vrm = gltf.userData.vrm;
   if (!vrm) throw new Error('VRM 데이터를 찾지 못했습니다');
-  const v0 = vrm.meta?.metaVersion === '0';
+  const s = vrm.meta?.metaVersion === '0' ? -1 : 1;
   VRMUtils.rotateVRM0(vrm);
   vrm.scene.traverse((o) => { o.frustumCulled = false; });
-  const s = v0 ? -1 : 1;
   const bone = (n) => vrm.humanoid.getNormalizedBoneNode(n);
   const head = bone('head'), neck = bone('neck'), chest = bone('upperChest') || bone('chest') || bone('spine');
-  const lArm = bone('leftUpperArm'), rArm = bone('rightUpperArm'), lFore = bone('leftLowerArm'), rFore = bone('rightLowerArm');
-  if (lArm) lArm.rotation.z = -1.22 * s;
-  if (rArm) rArm.rotation.z = 1.22 * s;
-  if (lFore) lFore.rotation.z = -0.12 * s;
-  if (rFore) rFore.rotation.z = 0.12 * s;
+  sit(vrm, s);
   vrm.update(0);
   vrm.scene.updateMatrixWorld(true);
-  const hp = new THREE.Vector3();
-  (head || vrm.scene).getWorldPosition(hp);
+  const wp = (n) => { const b = vrm.humanoid.getRawBoneNode(n); return b ? b.getWorldPosition(new THREE.Vector3()) : null; };
+  const pts = ['head', 'hips', 'leftLowerLeg', 'rightLowerLeg', 'leftFoot', 'rightFoot', 'leftHand', 'rightHand'].map(wp).filter(Boolean);
+  const hp = wp('head') || new THREE.Vector3(0, 1.4, 0);
+  const top = hp.y + 0.24, bottom = Math.min(...pts.map((p) => p.y)) - 0.1;
+  const halfW = Math.max(...pts.map((p) => Math.abs(p.x))) + 0.14;
+  const zMid = (Math.max(...pts.map((p) => p.z)) + Math.min(...pts.map((p) => p.z))) / 2;
+  const root = new THREE.Group();
+  root.add(vrm.scene);
+  const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
+  sh.rotation.x = -Math.PI / 2; sh.position.set(0, bottom + 0.06, zMid); sh.scale.set(halfW * 2.5, halfW * 1.9, 1);
+  root.add(sh);
+  root.visible = false;
   const em = vrm.expressionManager;
   const setE = (n, v) => { if (em && em.getExpression(n)) em.setValue(n, clamp01(v)); };
   return {
-    root: vrm.scene,
-    center: new THREE.Vector3(0, hp.y - 0.05, 0), halfH: 0.3, halfW: 0.25,
+    defId: def.id, root,
+    center: new THREE.Vector3(0, (top + bottom) / 2, zMid), halfH: (top - bottom) / 2, halfW,
     update(p, dt, t) {
       const e = p.euler;
       if (head) head.rotation.set(e.x * 0.6 * s, e.y * 0.6, e.z * 0.6 * s);
       if (neck) neck.rotation.set(e.x * 0.3 * s, e.y * 0.3, e.z * 0.3 * s);
-      if (chest) chest.rotation.set(Math.sin(t * 1.1) * 0.012 * s, e.y * 0.15, e.z * 0.1 * s);
+      if (chest) chest.rotation.set(Math.sin(t * 0.9 + p.phase) * 0.014 * s, e.y * 0.12, e.z * 0.08 * s);
       const b = p.blend;
       setE('blinkLeft', (b.eyeBlinkLeft || 0) * 1.25);
       setE('blinkRight', (b.eyeBlinkRight || 0) * 1.25);
       setE('aa', (b.jawOpen || 0) * 1.4);
-      setE('oh', (b.mouthFunnel || 0));
+      setE('oh', b.mouthFunnel || 0);
       setE('ou', (b.mouthPucker || 0) * 0.8);
       setE('happy', ((b.mouthSmileLeft || 0) + (b.mouthSmileRight || 0)) * 0.3);
       vrm.update(dt);
     },
+    dispose() { scene.remove(root); try { VRMUtils.deepDispose(vrm.scene); } catch (e) { /* 무시 */ } },
   };
 }
 
-function makeHuman(gltf) {
-  const model = gltf.scene;
-  const morphs = [];
-  model.traverse((o) => { o.frustumCulled = false; if (o.isMesh && o.morphTargetDictionary) morphs.push(o); });
-  const get = (n) => model.getObjectByName(n);
-  const parts = [['Head', 0.6], ['Neck', 0.3], ['Spine2', 0.12]].map(([n, w]) => ({ b: get(n), w })).filter((x) => x.b);
-  for (const x of parts) x.rest = x.b.quaternion.clone();
-  model.updateMatrixWorld(true);
-  const hp = new THREE.Vector3();
-  (get('Head') || model).getWorldPosition(hp);
-  const q = new THREE.Quaternion(), e2 = new THREE.Euler();
-  return {
-    root: model, center: new THREE.Vector3(0, hp.y + 0.03, 0), halfH: 0.3, halfW: 0.25,
-    update(p, dt, t) {
-      const e = p.euler;
-      for (const x of parts) {
-        e2.set(e.x * x.w, e.y * x.w, e.z * x.w);
-        x.b.quaternion.copy(x.rest).multiply(q.setFromEuler(e2));
-      }
-      const b = p.blend;
-      for (const m of morphs) {
-        const d = m.morphTargetDictionary, inf = m.morphTargetInfluences;
-        for (const name in b) { const i = d[name]; if (i !== undefined) inf[i] = b[name]; }
-      }
-    },
-  };
-}
+/* ---------- 상태 ---------- */
+const S = { role: null, code: '', myId: null, name: '', avatar: 'a', bg: BGS[0].id, peer: null, hostConn: null, conns: new Map(), calls: new Map(), mic: null, micOn: true, bowl: false, camOn: false, ended: false };
+const members = new Map(); // id -> { id, name, avatar, host, slot, inst, token, pose, target, lastSeen }
+const statusEl = $('#status');
+const say = (t, bad) => { statusEl.textContent = t; statusEl.classList.toggle('bad', !!bad); };
 
-let pickToken = 0;
-async function pickAvatar(def) {
-  const token = ++pickToken;
-  document.querySelectorAll('#avatars .chip').forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.id === def.id)));
+function newPose() { return { blend: {}, quat: new THREE.Quaternion(), euler: new THREE.Euler(), phase: Math.random() * 6 }; }
+function addMember(m) {
+  if (members.has(m.id)) return members.get(m.id);
+  const mem = { id: m.id, name: m.name, avatar: m.avatar, host: !!m.host, slot: null, inst: null, token: 0, pose: newPose(), target: { blend: {}, quat: new THREE.Quaternion() }, lastSeen: 0 };
+  members.set(mem.id, mem);
+  loadInst(mem);
+  layout();
+  return mem;
+}
+function removeMember(id) {
+  const mem = members.get(id); if (!mem) return;
+  mem.token++; if (mem.inst) mem.inst.dispose();
+  members.delete(id);
+  layout();
+}
+async function loadInst(mem) {
+  const token = ++mem.token, want = mem.avatar;
   try {
-    if (!cache.has(def.id)) {
-      const gltf = await loader.loadAsync(def.url, (ev) => {
-        if (token !== pickToken) return;
-        say(ev.total ? `${def.label} 불러오는 중… ${Math.round((ev.loaded / ev.total) * 100)}%` : `${def.label} 불러오는 중…`);
-      });
-      cache.set(def.id, def.type === 'vrm' ? makeVrm(gltf) : makeHuman(gltf));
-    }
-    if (token !== pickToken) return;
-    if (current) scene.remove(current.root);
-    current = cache.get(def.id);
-    scene.add(current.root);
-    frame();
-    say(tracking ? trackMsg() : '아바타 준비 완료');
+    const inst = await makeAvatar(want);
+    if (mem.token !== token || !members.has(mem.id)) { inst.dispose(); return; }
+    if (mem.inst) mem.inst.dispose();
+    mem.inst = inst; scene.add(inst.root);
+    if (mem.slot) mem.slot.querySelector('.ld')?.remove();
   } catch (err) {
     console.error(err);
-    if (token === pickToken) say(`${def.label}을(를) 불러오지 못했습니다. 연결 상태를 확인하고 다시 눌러 주세요.`, true);
+    if (mem.slot && mem.token === token) { const l = mem.slot.querySelector('.ld'); if (l) l.textContent = '아바타를 불러오지 못했습니다'; }
   }
+}
+function setAvatar(id, avatar) { const mem = members.get(id); if (!mem || mem.avatar === avatar) return; mem.avatar = avatar; if (mem.slot && !mem.slot.querySelector('.ld')) mem.slot.append(el('div', 'ld', '바꾸는 중…')); loadInst(mem).then(() => mem.slot?.querySelector('.ld')?.remove()); }
+
+function layout() {
+  const hostSlot = $('#hostSlot'), grid = $('#grid');
+  const host = [...members.values()].find((m) => m.host);
+  const guests = [...members.values()].filter((m) => !m.host);
+  const fill = (slot, mem, label) => {
+    slot.replaceChildren();
+    if (!mem.inst) slot.append(el('div', 'ld', '아바타 불러오는 중…'));
+    slot.append(el('div', 'nm', label));
+    mem.slot = slot;
+  };
+  if (host) fill(hostSlot, host, `진행자 · ${host.name}${host.id === S.myId ? ' (나)' : ''}`); else hostSlot.replaceChildren();
+  grid.replaceChildren();
+  const n = guests.length, cols = n <= 3 ? Math.max(n, 1) : n <= 8 ? 4 : 5;
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  if (!n) grid.append(Object.assign(el('div', null, S.role === 'host' ? '아직 참가자가 없습니다.\n코드나 초대 링크를 보내 주세요.' : ''), { id: 'empty', style: 'white-space:pre-line' + (S.role === 'host' ? '' : ';display:none') }));
+  guests.sort((a, b) => (a.id === S.myId ? -1 : b.id === S.myId ? 1 : 0));
+  for (const g of guests) { const slot = el('div', 'slot'); fill(slot, g, g.id === S.myId ? `${g.name} (나)` : g.name); grid.append(slot); }
+  $('#countPill').textContent = `${members.size}명`;
 }
 
-function frame() {
-  const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  if (current) {
-    const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-    const dist = Math.max(current.halfH / t, current.halfW / (t * camera.aspect));
-    const lift = current.halfH * (h > w ? 0.35 : 0.1);
-    camera.position.set(current.center.x, current.center.y - lift, dist);
-    camera.lookAt(current.center.x, current.center.y - lift, 0);
-  }
-  camera.updateProjectionMatrix();
+/* ---------- 표정 데이터 ---------- */
+const enc = (blend, e) => [[+e.x.toFixed(3), +e.y.toFixed(3), +e.z.toFixed(3)], KEYS.map((k) => Math.round((blend[k] || 0) * 100))];
+function applyPacket(mem, pk, mirror) {
+  const [e, b] = pk, blend = {};
+  KEYS.forEach((k, i) => { blend[k] = (b[i] || 0) / 100; });
+  if (mirror) {
+    for (const k of KEYS) if (k.endsWith('Left')) { const r = k.replace(/Left$/, 'Right'), t = blend[k]; blend[k] = blend[r]; blend[r] = t; }
+    mem.target.quat.setFromEuler(new THREE.Euler(e[0], -e[1], -e[2]));
+  } else mem.target.quat.setFromEuler(new THREE.Euler(e[0], e[1], e[2]));
+  mem.target.blend = blend; mem.lastSeen = performance.now();
 }
-addEventListener('resize', frame);
 
 /* ---------- 얼굴 추적 ---------- */
-const pip = $('#pip');
-let landmarker = null, tracking = false, lastVT = -1, lastSeen = 0, fps = 0, fpsN = 0, fpsT = 0, delegate = '';
-const target = { blend: {}, quat: new THREE.Quaternion() };
-const pose = { blend: {}, quat: new THREE.Quaternion(), euler: new THREE.Euler() };
+const cam = $('#cam');
+let landmarker = null, lastVT = -1, myPacket = null, myPacketAt = 0;
 const m4 = new THREE.Matrix4(), tmpE = new THREE.Euler();
-const trackMsg = () => (performance.now() - lastSeen < 900 ? `추적 중 · ${fps}fps` : '얼굴을 찾는 중… 화면 정면을 봐 주세요');
-
-function setTarget(blend, euler) {
-  target.blend = blend;
-  target.quat.setFromEuler(euler);
-  lastSeen = performance.now();
+async function startCamera() {
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('nocam');
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    cam.srcObject = stream; await cam.play();
+    S.camOn = true;
+    if (!landmarker) {
+      const { FaceLandmarker, FilesetResolver } = await import(`${MP}/vision_bundle.mjs`);
+      const files = await FilesetResolver.forVisionTasks(`${MP}/wasm`);
+      const opt = (d) => ({ baseOptions: { modelAssetPath: FACE_MODEL, delegate: d }, runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true });
+      try { landmarker = await FaceLandmarker.createFromOptions(files, opt('GPU')); }
+      catch (e) { console.warn('GPU 실패, CPU로 전환', e); landmarker = await FaceLandmarker.createFromOptions(files, opt('CPU')); }
+    }
+    return true;
+  } catch (err) { console.warn(err); S.camOn = false; return false; }
 }
-window.__avatarTest = { setTarget: (b, x, y, z, hold) => { setTarget(b || {}, new THREE.Euler(x || 0, y || 0, z || 0)); if (hold) lastSeen += 6e4; }, get: () => ({ x: pose.euler.x, y: pose.euler.y, z: pose.euler.z, seen: performance.now() - lastSeen < 900, fps, delegate }) };
-
-function onResult(r) {
-  if (!r.faceBlendshapes || !r.faceBlendshapes.length) return;
+function stopCamera() { cam.srcObject?.getTracks().forEach((t) => t.stop()); cam.srcObject = null; S.camOn = false; myPacket = null; }
+function track(now) {
+  if (!S.camOn || !landmarker || cam.readyState < 2 || cam.currentTime === lastVT) return;
+  lastVT = cam.currentTime;
+  let r; try { r = landmarker.detectForVideo(cam, now); } catch (e) { return; }
+  if (!r.faceBlendshapes?.length) return;
   const blend = {};
   for (const c of r.faceBlendshapes[0].categories) blend[c.categoryName] = c.score;
-  const mat = r.facialTransformationMatrixes && r.facialTransformationMatrixes[0];
-  if (mat) {
-    m4.fromArray(mat.data);
-    tmpE.setFromRotationMatrix(m4);
-    const L = 0.7;
-    tmpE.set(THREE.MathUtils.clamp(tmpE.x, -L, L), THREE.MathUtils.clamp(tmpE.y, -L, L), THREE.MathUtils.clamp(tmpE.z, -L, L));
-  } else tmpE.set(0, 0, 0);
-  setTarget(blend, tmpE);
-  fpsN++;
+  const mat = r.facialTransformationMatrixes?.[0];
+  if (mat) { m4.fromArray(mat.data); tmpE.setFromRotationMatrix(m4); const L = 0.6, c = THREE.MathUtils.clamp; tmpE.set(c(tmpE.x, -L, L), c(tmpE.y, -L, L), c(tmpE.z, -L, L)); } else tmpE.set(0, 0, 0);
+  setMyPacket(enc(blend, tmpE));
+}
+function setMyPacket(pk) { myPacket = pk; myPacketAt = performance.now(); const me = members.get(S.myId); if (me) applyPacket(me, pk, true); }
+
+/* ---------- 연결 ---------- */
+const hostPeerId = (code) => PREFIX + code.toLowerCase() + '-host';
+const newCode = () => Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
+const roster = () => [...members.values()].map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, host: m.host }));
+const cast = (msg, except) => { for (const [id, c] of S.conns) if (id !== except && c.open) c.send(msg); };
+const micConstraints = () => ({ audio: S.bowl ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+
+function openHost(tries = 0) {
+  return new Promise((resolve, reject) => {
+    const code = newCode(), peer = new Peer(hostPeerId(code));
+    peer.on('open', (id) => { S.peer = peer; S.code = code; S.myId = id; resolve(); });
+    peer.on('error', (err) => {
+      if (S.peer === peer) { if (err.type === 'network' || err.type === 'disconnected') say('연결이 불안정합니다. 다시 연결하는 중…', true); return; }
+      peer.destroy();
+      if (err.type === 'unavailable-id' && tries < 3) openHost(tries + 1).then(resolve, reject); else reject(err);
+    });
+    peer.on('disconnected', () => { if (!S.ended) peer.reconnect(); });
+    peer.on('connection', (conn) => {
+      conn.on('data', (msg) => onHostData(conn, msg));
+      conn.on('close', () => { if (!S.conns.has(conn.peer)) return; S.conns.delete(conn.peer); S.calls.get(conn.peer)?.close(); S.calls.delete(conn.peer); removeMember(conn.peer); cast({ t: 'leave', id: conn.peer }); });
+    });
+  });
+}
+function onHostData(conn, msg) {
+  if (!msg || typeof msg !== 'object') return;
+  const id = conn.peer;
+  if (msg.t === 'hello') {
+    if (S.conns.size >= MAX_GUESTS) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 300); return; }
+    const m = { id, name: String(msg.name || '참가자').slice(0, 12), avatar: AVATARS.some((a) => a.id === msg.avatar) ? msg.avatar : 'a', host: false };
+    S.conns.set(id, conn); addMember(m);
+    conn.send({ t: 'room', you: id, bg: S.bg, members: roster() });
+    cast({ t: 'join', m }, id);
+    if (S.mic) S.calls.set(id, S.peer.call(id, S.mic));
+  } else if (!S.conns.has(id)) return;
+  else if (msg.t === 'p' && Array.isArray(msg.k)) { const mem = members.get(id); if (mem) { applyPacket(mem, msg.k, false); mem.raw = msg.k; } }
+  else if (msg.t === 'avatar' && AVATARS.some((a) => a.id === msg.avatar)) { setAvatar(id, msg.avatar); cast({ t: 'avatar', id, avatar: msg.avatar }); }
+}
+function joinRoom(code) {
+  return new Promise((resolve, reject) => {
+    const peer = new Peer(); let done = false;
+    const fail = (m) => { if (done) return; done = true; peer.destroy(); reject(new Error(m)); };
+    const timer = setTimeout(() => fail('연결 시간이 초과됐습니다. 네트워크를 확인하고 다시 시도해 주세요.'), 20000);
+    peer.on('error', (err) => {
+      if (done) { if (!S.ended && (err.type === 'network' || err.type === 'disconnected')) say('연결이 불안정합니다. 다시 연결하는 중…', true); return; }
+      clearTimeout(timer);
+      fail(err.type === 'peer-unavailable' ? '수업을 찾지 못했습니다. 코드를 확인하거나, 진행자가 수업을 열었는지 확인해 주세요.' : '연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.');
+    });
+    peer.on('disconnected', () => { if (!S.ended) peer.reconnect(); });
+    peer.on('call', (call) => { call.answer(); call.on('stream', playHost); });
+    peer.on('open', (id) => {
+      const conn = peer.connect(hostPeerId(code), { reliable: true });
+      conn.on('open', () => conn.send({ t: 'hello', name: S.name, avatar: S.avatar }));
+      conn.on('data', (msg) => {
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.t === 'full') { clearTimeout(timer); fail('수업 정원이 가득 찼습니다.'); }
+        else if (msg.t === 'room') { clearTimeout(timer); done = true; S.peer = peer; S.hostConn = conn; S.code = code; S.myId = id; S.bg = msg.bg; for (const m of msg.members || []) addMember(m); resolve(); }
+        else if (msg.t === 'join') addMember(msg.m);
+        else if (msg.t === 'leave') removeMember(msg.id);
+        else if (msg.t === 'avatar') setAvatar(msg.id, msg.avatar);
+        else if (msg.t === 'bg') setBg(msg.bg);
+        else if (msg.t === 'ps') { for (const pid in msg.a) { if (pid === S.myId) continue; const mem = members.get(pid); if (mem) applyPacket(mem, msg.a[pid], false); } }
+        else if (msg.t === 'end') endClass('진행자가 수업을 마쳤습니다. 함께해 주셔서 고맙습니다.');
+      });
+      conn.on('close', () => { if (done) endClass('수업과의 연결이 끊겼습니다. 수업이 끝났거나 네트워크가 불안정할 수 있습니다.'); });
+    });
+  });
+}
+function playHost(stream) {
+  const a = $('#hostAudio'); a.srcObject = stream;
+  a.play().then(() => { $('#unmute').hidden = true; say('진행자 목소리 연결됨'); }).catch(() => { $('#unmute').hidden = false; });
+}
+$('#unmute').addEventListener('click', () => { $('#hostAudio').play().then(() => { $('#unmute').hidden = true; say('진행자 목소리 연결됨'); }).catch(() => {}); });
+
+let lastSend = 0;
+function netTick(now) {
+  if (!S.peer || now - lastSend < SEND_MS) return;
+  lastSend = now;
+  const fresh = myPacket && now - myPacketAt < 900;
+  if (S.role === 'host') {
+    if (!S.conns.size) return;
+    const a = {};
+    if (fresh) a[S.myId] = myPacket;
+    for (const [id] of S.conns) { const mem = members.get(id); if (mem?.raw && now - mem.lastSeen < 900) a[id] = mem.raw; }
+    if (Object.keys(a).length) cast({ t: 'ps', a });
+  } else if (fresh && S.hostConn?.open) S.hostConn.send({ t: 'p', k: myPacket });
 }
 
-async function startCamera() {
-  const go = $('#go');
-  go.disabled = true; go.textContent = '준비 중…';
-  try {
-    if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('nocam'), { name: 'NotSupportedError' });
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
-    pip.srcObject = stream;
-    await pip.play();
-    say('얼굴 추적 모델 불러오는 중…');
-    const { FaceLandmarker, FilesetResolver } = await import(`${MP}/vision_bundle.mjs`);
-    const files = await FilesetResolver.forVisionTasks(`${MP}/wasm`);
-    const opt = (d) => ({ baseOptions: { modelAssetPath: FACE_MODEL, delegate: d }, runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true });
-    try { landmarker = await FaceLandmarker.createFromOptions(files, opt('GPU')); delegate = 'GPU'; }
-    catch (e) { console.warn('GPU 실패, CPU로 전환', e); landmarker = await FaceLandmarker.createFromOptions(files, opt('CPU')); delegate = 'CPU'; }
-    tracking = true;
-    $('#start').remove();
-    say(trackMsg());
-  } catch (err) {
-    console.error(err);
-    go.disabled = false; go.textContent = '다시 시도';
-    const msg = err.name === 'NotAllowedError' ? '카메라 권한이 거부됐습니다. 브라우저 설정에서 카메라를 허용한 뒤 다시 시도해 주세요.'
-      : err.name === 'NotFoundError' ? '카메라를 찾지 못했습니다.'
-      : err.name === 'NotSupportedError' ? '이 브라우저에서는 카메라를 쓸 수 없습니다. 사파리나 크롬으로 열어 주세요.'
-      : '시작하지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요.';
-    say(msg, true);
-  }
+/* ---------- 화면 ---------- */
+function setBg(id) {
+  S.bg = id;
+  const [w, h] = innerHeight > innerWidth ? [1080, 1920] : [1920, 1080];
+  $('#bg').src = bgUrl(id, w, h);
 }
-$('#go').addEventListener('click', startCamera);
+function toBar() {
+  const bar = $('#bar'); bar.replaceChildren();
+  const add = (label, on, fn, cls) => { const b = el('button', 'btn' + (cls ? ' ' + cls : ''), label); b.type = 'button'; if (on != null) b.setAttribute('aria-pressed', String(on)); b.addEventListener('click', fn); bar.append(b); return b; };
+  if (S.role === 'host') add(S.micOn ? '마이크 켜짐' : '마이크 꺼짐', S.micOn, toggleMic);
+  add(S.camOn ? '카메라 켜짐' : '카메라 꺼짐', S.camOn, toggleCam);
+  add('아바타', null, () => openSheet('avatar'));
+  if (S.role === 'host') { add('배경·소리', null, () => openSheet('host')); add('초대', null, invite); }
+  add(S.role === 'host' ? '수업 종료' : '나가기', null, leave, 'danger');
+}
+function openSheet(kind) {
+  const sh = $('#sheet'); sh.replaceChildren(); sh.hidden = false;
+  const close = el('button', 'chip', '닫기'); close.type = 'button'; close.addEventListener('click', () => { sh.hidden = true; });
+  if (kind === 'avatar') {
+    sh.append(el('h2', null, '내 아바타'));
+    const row = el('div', 'row');
+    for (const a of AVATARS) { const b = el('button', 'chip', a.label); b.type = 'button'; b.setAttribute('aria-pressed', String(a.id === S.avatar)); b.addEventListener('click', () => { pickAvatar(a.id); sh.hidden = true; }); row.append(b); }
+    sh.append(row);
+  } else {
+    sh.append(el('h2', null, '배경 (모두에게 바뀝니다)'));
+    const row = el('div', 'row');
+    for (const g of BGS) { const b = el('button', 'thumb'); b.type = 'button'; b.setAttribute('aria-label', g.label); b.setAttribute('aria-pressed', String(g.id === S.bg)); b.style.backgroundImage = `url(${bgUrl(g.id, 120, 120)})`; b.addEventListener('click', () => { setBg(g.id); cast({ t: 'bg', bg: g.id }); openSheet('host'); }); row.append(b); }
+    sh.append(row, el('h2', null, '소리'));
+    const row2 = el('div', 'row'), bowl = el('button', 'chip', '싱잉볼 모드 (잡음 제거 끔)'); bowl.type = 'button'; bowl.setAttribute('aria-pressed', String(S.bowl));
+    bowl.addEventListener('click', async () => { S.bowl = !S.bowl; await startMic(); openSheet('host'); });
+    row2.append(bowl); sh.append(row2);
+  }
+  sh.append(close);
+}
+function pickAvatar(id) {
+  S.avatar = id; setAvatar(S.myId, id);
+  if (S.role === 'host') cast({ t: 'avatar', id: S.myId, avatar: id }); else if (S.hostConn?.open) S.hostConn.send({ t: 'avatar', avatar: id });
+}
+async function startMic() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(micConstraints());
+    const track = stream.getAudioTracks()[0]; track.enabled = S.micOn;
+    const old = S.mic; S.mic = stream;
+    for (const [id, call] of S.calls) { const snd = call.peerConnection?.getSenders().find((x) => x.track?.kind === 'audio'); if (snd) snd.replaceTrack(track); else if (S.conns.has(id)) S.calls.set(id, S.peer.call(id, stream)); }
+    for (const [id] of S.conns) if (!S.calls.has(id)) S.calls.set(id, S.peer.call(id, stream));
+    old?.getTracks().forEach((t) => t.stop());
+    return true;
+  } catch (err) { console.warn(err); return false; }
+}
+function toggleMic() { S.micOn = !S.micOn; S.mic?.getAudioTracks().forEach((t) => { t.enabled = S.micOn; }); if (S.micOn && !S.mic) startMic().then((ok) => { if (!ok) { S.micOn = false; say('마이크를 쓸 수 없습니다. 브라우저 설정에서 허용해 주세요.', true); } toBar(); }); toBar(); hostStatus(); }
+async function toggleCam() {
+  if (S.camOn) { stopCamera(); toBar(); return; }
+  say('카메라 준비 중…');
+  const ok = await startCamera(); toBar();
+  say(ok ? '카메라 켜짐 · 아바타가 따라 움직입니다' : '카메라를 쓸 수 없습니다. 브라우저 설정에서 허용해 주세요.', !ok);
+}
+const hostStatus = () => say(!S.mic ? '마이크 없음 · 참가자에게 소리가 가지 않습니다' : S.micOn ? '마이크 송출 중' : '마이크 꺼짐', !S.mic);
+const inviteUrl = () => `${location.origin}${location.pathname}?room=${S.code}`;
+async function invite() {
+  const text = `명상 클래스에 초대합니다. 수업 코드: ${S.code}`;
+  try { if (navigator.share) { await navigator.share({ title: '명상 클래스', text, url: inviteUrl() }); return; } } catch (e) { if (e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(`${text}\n${inviteUrl()}`); say('초대 링크를 복사했습니다'); } catch (e) { say(inviteUrl()); }
+}
+function leave() {
+  if (S.role === 'host') { cast({ t: 'end' }); setTimeout(() => endClass('수업을 마쳤습니다.'), 250); } else endClass('수업에서 나왔습니다.');
+}
+function endClass(msg) {
+  if (S.ended) return; S.ended = true;
+  stopCamera(); S.mic?.getTracks().forEach((t) => t.stop());
+  try { S.peer?.destroy(); } catch (e) { /* 무시 */ }
+  wake?.release?.().catch(() => {});
+  $('#sheet').hidden = true; $('#unmute').hidden = true;
+  $('#overMsg').textContent = msg; $('#over').hidden = false;
+}
+$('#overBtn').addEventListener('click', () => { location.href = location.pathname; });
+
+let wake = null;
+async function keepAwake() { try { wake = await navigator.wakeLock?.request('screen'); } catch (e) { /* 지원 안 함 */ } }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.peer && !S.ended) keepAwake(); });
+
+/* ---------- 로비 ---------- */
+let mode = 'join';
+function setMode(m) {
+  mode = m;
+  $('#tabJoin').setAttribute('aria-selected', String(m === 'join')); $('#tabHost').setAttribute('aria-selected', String(m === 'host'));
+  $('#codeWrap').hidden = m === 'host';
+  $('#enter').textContent = m === 'host' ? '수업 열기' : '참가하기';
+  $('#lobbyNote').textContent = m === 'host' ? '수업을 열면 마이크와 카메라 사용을 묻습니다. 마이크는 진행 목소리를 보내는 데, 카메라는 아바타를 움직이는 데만 씁니다.' : '입장할 때 카메라 사용을 묻습니다. 허용하지 않아도 참가할 수 있고, 그 경우 아바타는 가만히 앉아 있습니다.';
+  $('#lobbyErr').hidden = true;
+}
+$('#tabJoin').addEventListener('click', () => setMode('join'));
+$('#tabHost').addEventListener('click', () => setMode('host'));
+const lobbyErr = (t) => { const e = $('#lobbyErr'); e.textContent = t; e.hidden = false; };
+$('#enter').addEventListener('click', async () => {
+  const btn = $('#enter'), name = $('#name').value.trim(), code = $('#code').value.trim().toUpperCase();
+  $('#lobbyErr').hidden = true;
+  if (!name) { lobbyErr('이름을 입력해 주세요.'); $('#name').focus(); return; }
+  if (mode === 'join' && !/^[A-Z0-9]{6}$/.test(code)) { lobbyErr('수업 코드 6자리를 입력해 주세요.'); $('#code').focus(); return; }
+  if (typeof Peer === 'undefined') { lobbyErr('연결 모듈을 불러오지 못했습니다. 새로고침해 주세요.'); return; }
+  btn.disabled = true; btn.textContent = '연결 중…';
+  S.name = name.slice(0, 12); S.role = mode;
+  try { localStorage.setItem('medclass-name', S.name); } catch (e) { /* 무시 */ }
+  try {
+    if (mode === 'host') { await openHost(); addMember({ id: S.myId, name: S.name, avatar: S.avatar, host: true }); await startMic(); }
+    else await joinRoom(code);
+  } catch (err) {
+    console.error(err); btn.disabled = false; setMode(mode);
+    lobbyErr(err.message && /[가-힣]/.test(err.message) ? err.message : '수업에 연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.');
+    return;
+  }
+  $('#lobby').hidden = true; $('#room').hidden = false;
+  $('#codePill').textContent = `코드 ${S.code}`;
+  setBg(S.bg); layout(); resize(); keepAwake();
+  if (S.role === 'host') hostStatus(); else say('진행자 목소리를 기다리는 중…');
+  toBar();
+  await startCamera(); toBar();
+  if (S.role === 'join' && !S.camOn) say('카메라 없이 참가 중 · 아바타는 가만히 앉아 있습니다');
+});
+addEventListener('pagehide', () => { if (S.role === 'host' && !S.ended) cast({ t: 'end' }); });
 
 /* ---------- 루프 ---------- */
+function resize() { renderer.setSize(innerWidth, innerHeight, false); }
+addEventListener('resize', () => { resize(); if (S.peer) setBg(S.bg); });
 const clock = new THREE.Clock();
 function tick() {
   requestAnimationFrame(tick);
-  const dt = Math.min(clock.getDelta(), 0.1), now = performance.now();
-  if (tracking && landmarker && pip.readyState >= 2 && pip.currentTime !== lastVT) {
-    lastVT = pip.currentTime;
-    try { onResult(landmarker.detectForVideo(pip, now)); } catch (e) { console.warn(e); }
+  const dt = Math.min(clock.getDelta(), 0.1), now = performance.now(), t = clock.elapsedTime;
+  track(now); netTick(now);
+  renderer.setScissor(0, 0, innerWidth, innerHeight); renderer.setViewport(0, 0, innerWidth, innerHeight); renderer.clear();
+  if ($('#room').hidden) return;
+  const a = 1 - Math.pow(0.0005, dt * 4), tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  for (const mem of members.values()) {
+    const lost = now - mem.lastSeen > 900, p = mem.pose;
+    for (const k of KEYS) p.blend[k] = THREE.MathUtils.lerp(p.blend[k] || 0, lost ? 0 : mem.target.blend[k] || 0, a);
+    if (lost) mem.target.quat.identity();
+    p.quat.slerp(mem.target.quat, lost ? a * 0.3 : a); p.euler.setFromQuaternion(p.quat);
+    const inst = mem.inst; if (!inst || !mem.slot) continue;
+    inst.update(p, dt, t);
+    const r = mem.slot.getBoundingClientRect(); if (r.width < 8 || r.height < 8) continue;
+    const y = innerHeight - r.bottom;
+    renderer.setViewport(r.left, y, r.width, r.height); renderer.setScissor(r.left, y, r.width, r.height);
+    camera.aspect = r.width / r.height;
+    const dist = Math.max(inst.halfH / tan, inst.halfW / (tan * camera.aspect)) * 1.04;
+    camera.position.set(inst.center.x, inst.center.y + dist * 0.12, inst.center.z + dist);
+    camera.lookAt(inst.center); camera.updateProjectionMatrix();
+    inst.root.visible = true; renderer.render(scene, camera); inst.root.visible = false;
   }
-  if (now - fpsT > 1000) { fps = Math.round((fpsN * 1000) / (now - fpsT)); fpsN = 0; fpsT = now; if (tracking && !statusEl.classList.contains('err')) say(trackMsg()); }
-  const lost = now - lastSeen > 900;
-  const a = 1 - Math.pow(0.0005, dt * 4);
-  const keys = lost ? Object.keys(pose.blend) : Object.keys(target.blend);
-  for (const k of keys) pose.blend[k] = THREE.MathUtils.lerp(pose.blend[k] || 0, lost ? 0 : target.blend[k], a);
-  if (lost) target.quat.identity();
-  pose.quat.slerp(target.quat, lost ? a * 0.3 : a);
-  pose.euler.setFromQuaternion(pose.quat);
-  if (current) current.update(pose, dt, clock.elapsedTime);
-  renderer.render(scene, camera);
 }
 
-/* ---------- UI ---------- */
-const avRow = $('#avatars');
-for (const d of AVATARS) {
-  const b = document.createElement('button');
-  b.type = 'button'; b.className = 'chip'; b.dataset.id = d.id; b.textContent = d.label; b.setAttribute('aria-pressed', 'false');
-  b.addEventListener('click', () => pickAvatar(d));
-  avRow.append(b);
-}
-const bgImg = $('#bgImg'), bgVid = $('#bgVid'), bgRow = $('#bgs');
-function setBg(kind, src, btn) {
-  bgRow.querySelectorAll('.thumb').forEach((t) => t.setAttribute('aria-pressed', String(t === btn)));
-  if (kind === 'video') { bgVid.src = src; bgVid.style.display = 'block'; bgVid.play().catch(() => {}); }
-  else { bgVid.pause(); bgVid.style.display = 'none'; bgImg.src = src; }
-}
-const big = () => (innerHeight > innerWidth ? [1080, 1920] : [1920, 1080]);
-BGS.forEach((g, i) => {
-  const b = document.createElement('button');
-  b.type = 'button'; b.className = 'thumb'; b.setAttribute('aria-label', g.label); b.setAttribute('aria-pressed', 'false');
-  b.style.backgroundImage = `url(${bgUrl(g.id, 120, 120)})`;
-  b.addEventListener('click', () => setBg('image', bgUrl(g.id, ...big()), b));
-  bgRow.append(b);
-  if (i === 0) setBg('image', bgUrl(g.id, ...big()), b);
-});
-const up = document.createElement('button');
-up.type = 'button'; up.className = 'thumb up'; up.textContent = '+'; up.setAttribute('aria-label', '내 사진이나 영상 올리기'); up.setAttribute('aria-pressed', 'false');
-up.addEventListener('click', () => $('#file').click());
-bgRow.append(up);
-$('#file').addEventListener('change', (e) => {
-  const f = e.target.files[0]; if (!f) return;
-  setBg(f.type.startsWith('video') ? 'video' : 'image', URL.createObjectURL(f), up);
-});
-const press = (btn, on) => btn.setAttribute('aria-pressed', String(on));
-$('#mirrorBtn').addEventListener('click', (e) => { const on = !canvas.classList.contains('mirror'); canvas.classList.toggle('mirror', on); press(e.currentTarget, on); });
-$('#pipBtn').addEventListener('click', (e) => { const on = pip.style.display !== 'block'; pip.style.display = on ? 'block' : 'none'; press(e.currentTarget, on); });
-$('#toggle').addEventListener('click', (e) => { const hide = !$('#panel').classList.contains('hide'); $('#panel').classList.toggle('hide', hide); e.currentTarget.textContent = hide ? '메뉴 보기' : '메뉴 숨기기'; });
-
-frame();
-tick();
-pickAvatar(AVATARS[0]);
+/* ---------- 시작 ---------- */
+window.__cls = { S, members, POSE, setMyPacket, enc, repose: () => { for (const m of members.values()) loadInst(m); } };
+try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; } catch (e) { /* 무시 */ }
+const preset = new URLSearchParams(location.search).get('room');
+if (preset && /^[A-Za-z0-9]{6}$/.test(preset)) $('#code').value = preset.toUpperCase();
+setBg(S.bg); resize(); tick();
 </script>
 </body>
 </html>
