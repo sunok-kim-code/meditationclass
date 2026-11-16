@@ -514,17 +514,25 @@ function openHost(tries = 0) {
     const code = newCode(), peer = new Peer(hostPeerId(code));
     peer.on('open', (id) => { if (S.peer === peer) { hostStatus(); return; } S.peer = peer; S.code = code; S.myId = id; resolve(); });
     peer.on('error', (err) => {
-      if (S.peer === peer) { if (err.type === 'network' || err.type === 'disconnected') say('연결 서버에 다시 붙는 중… 수업은 계속됩니다'); return; }
+      if (S.peer === peer) { if (!S.ended && ['network', 'disconnected', 'server-error', 'socket-error', 'socket-closed', 'unavailable-id'].includes(err.type)) { say('연결 서버에 다시 붙는 중… 그동안 새 참가자는 들어올 수 없습니다', true); setTimeout(relink, 2500); } return; }
       peer.destroy();
       if (err.type === 'unavailable-id' && tries < 3) openHost(tries + 1).then(resolve, reject); else reject(err);
     });
-    peer.on('disconnected', () => { if (!S.ended) peer.reconnect(); });
+    peer.on('disconnected', () => { if (!S.ended) { say('연결 서버에 다시 붙는 중… 그동안 새 참가자는 들어올 수 없습니다', true); relink(); } });
     peer.on('connection', (conn) => {
       conn.on('data', (msg) => onHostData(conn, msg));
       conn.on('close', () => { if (!S.conns.has(conn.peer)) return; S.conns.delete(conn.peer); S.calls.get(conn.peer)?.close(); S.calls.delete(conn.peer); removeMember(conn.peer); cast({ t: 'leave', id: conn.peer }); });
     });
   });
 }
+// 연결 서버(참가자가 수업을 찾을 때 거치는 곳)와 끊겼으면 다시 붙는다. 폰에서 다른 앱에 다녀오면 끊기는 일이 잦다
+function relink() {
+  const p = S.peer; if (!p || S.ended || p.destroyed) return;
+  if (p.disconnected) { try { p.reconnect(); } catch (e) { /* 다음 점검 때 다시 */ } }
+}
+setInterval(relink, 4000);
+addEventListener('online', relink);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') relink(); });
 function onHostData(conn, msg) {
   if (!msg || typeof msg !== 'object') return;
   const id = conn.peer;
@@ -543,34 +551,43 @@ function onHostData(conn, msg) {
 }
 function joinRoom(code) {
   return new Promise((resolve, reject) => {
-    const peer = new Peer(); let done = false;
-    const fail = (m) => { if (done) return; done = true; peer.destroy(); reject(new Error(m)); };
-    const timer = setTimeout(() => fail('연결 시간이 초과됐습니다. 네트워크를 확인하고 다시 시도해 주세요.'), 20000);
+    const peer = new Peer(); let done = false, tries = 0, conn = null;
+    const fail = (m) => { if (done) return; done = true; clearTimeout(timer); peer.destroy(); reject(new Error(m)); };
+    const timer = setTimeout(() => fail(tries > 1 ? NOT_FOUND : '연결 시간이 초과됐습니다. 네트워크를 확인하고 다시 시도해 주세요.'), 30000);
+    const NOT_FOUND = '수업을 찾지 못했습니다. 코드가 맞는지, 진행자의 수업 화면이 켜져 있는지 확인해 주세요. 진행자가 다른 앱이나 탭으로 넘어가 있으면 찾을 수 없습니다.';
+    const knock = () => {
+      if (done) return;
+      tries++;
+      if (tries > 1) $('#enter').textContent = `진행자를 찾는 중… (${tries})`;
+      conn = peer.connect(hostPeerId(code), { reliable: true });
+      conn.on('open', () => conn.send({ t: 'hello', name: S.name, avatar: S.avatar }));
+      conn.on('data', onData);
+      conn.on('close', () => { if (done && S.hostConn === conn) endClass('수업과의 연결이 끊겼습니다. 수업이 끝났거나 네트워크가 불안정할 수 있습니다.'); });
+    };
+    const onData = (msg) => {
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.t === 'full') fail('수업 정원이 가득 찼습니다.');
+      else if (msg.t === 'room') { if (done) return; clearTimeout(timer); done = true; S.peer = peer; S.hostConn = conn; S.code = code; S.myId = peer.id; S.awayOn = msg.awayOn !== false; setBg(msg.bg); for (const m of msg.members || []) addMember(m, m.id === peer.id); resolve(); }
+      else if (msg.t === 'join') addMember(msg.m, true);
+      else if (msg.t === 'leave') removeMember(msg.id);
+      else if (msg.t === 'avatar') setAvatar(msg.id, msg.avatar);
+      else if (msg.t === 'away') { if (msg.id !== S.myId) setAway(msg.id, !!msg.v); }
+      else if (msg.t === 'bg') setBg(msg.bg);
+      else if (msg.t === 'cfg') { S.awayOn = msg.awayOn !== false; if (!S.awayOn) { lastFace = performance.now(); iAmAway(false); } }
+      else if (msg.t === 'ps') { for (const pid in msg.a) { if (pid === S.myId) continue; const mem = members.get(pid); if (mem) applyPacket(mem, msg.a[pid], false); } }
+      else if (msg.t === 'end') endClass('진행자가 수업을 마쳤습니다. 함께해 주셔서 고맙습니다.');
+    };
     peer.on('error', (err) => {
       if (done) { if (!S.ended && (err.type === 'network' || err.type === 'disconnected')) say('연결 서버에 다시 붙는 중… 수업은 계속됩니다'); return; }
-      clearTimeout(timer);
-      fail(err.type === 'peer-unavailable' ? '수업을 찾지 못했습니다. 코드를 확인하거나, 진행자가 수업을 열었는지 확인해 주세요.' : '연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.');
+      if (err.type === 'peer-unavailable') { if (tries < 9) setTimeout(knock, 2500); else fail(NOT_FOUND); return; } // 진행자가 잠깐 끊겼을 수 있으니 몇 번 더 두드린다
+      if (err.type === 'network' || err.type === 'disconnected' || err.type === 'socket-closed') return; // 아래 disconnected에서 다시 붙는다
+      fail('연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.');
     });
-    peer.on('disconnected', () => { if (!S.ended) peer.reconnect(); });
+    peer.on('disconnected', () => { if (!S.ended && !peer.destroyed) { try { peer.reconnect(); } catch (e) { /* 무시 */ } } });
     peer.on('call', (call) => { call.answer(); call.on('stream', playHost); });
-    peer.on('open', (id) => {
+    peer.on('open', () => {
       if (done) { say($('#hostAudio').srcObject ? '진행자 목소리 연결됨' : '진행자 목소리를 기다리는 중…'); return; }
-      const conn = peer.connect(hostPeerId(code), { reliable: true });
-      conn.on('open', () => conn.send({ t: 'hello', name: S.name, avatar: S.avatar }));
-      conn.on('data', (msg) => {
-        if (!msg || typeof msg !== 'object') return;
-        if (msg.t === 'full') { clearTimeout(timer); fail('수업 정원이 가득 찼습니다.'); }
-        else if (msg.t === 'room') { clearTimeout(timer); done = true; S.peer = peer; S.hostConn = conn; S.code = code; S.myId = id; S.awayOn = msg.awayOn !== false; setBg(msg.bg); for (const m of msg.members || []) addMember(m, m.id === id); resolve(); }
-        else if (msg.t === 'join') addMember(msg.m, true);
-        else if (msg.t === 'leave') removeMember(msg.id);
-        else if (msg.t === 'avatar') setAvatar(msg.id, msg.avatar);
-        else if (msg.t === 'away') { if (msg.id !== S.myId) setAway(msg.id, !!msg.v); }
-        else if (msg.t === 'bg') setBg(msg.bg);
-        else if (msg.t === 'cfg') { S.awayOn = msg.awayOn !== false; if (!S.awayOn) { lastFace = performance.now(); iAmAway(false); } }
-        else if (msg.t === 'ps') { for (const pid in msg.a) { if (pid === S.myId) continue; const mem = members.get(pid); if (mem) applyPacket(mem, msg.a[pid], false); } }
-        else if (msg.t === 'end') endClass('진행자가 수업을 마쳤습니다. 함께해 주셔서 고맙습니다.');
-      });
-      conn.on('close', () => { if (done) endClass('수업과의 연결이 끊겼습니다. 수업이 끝났거나 네트워크가 불안정할 수 있습니다.'); });
+      if (!tries) knock();
     });
   });
 }
