@@ -16,7 +16,7 @@ module.exports = async (req, res) => {
   const clean = (v) => (v || '').trim().replace(/^["']|["']$/g, '').trim();
   const id = clean(process.env.CF_TURN_KEY_ID), token = clean(process.env.CF_TURN_API_TOKEN);
   if (!id || !token) { res.status(200).json({ configured: false, missing: [!id && 'CF_TURN_KEY_ID', !token && 'CF_TURN_API_TOKEN'].filter(Boolean) }); return; }
-  const ask = (keyId, apiToken) => fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate-ice-servers`, {
+  const ask = (keyId, apiToken, path = 'generate-ice-servers') => fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ ttl: 21600 }), // 6시간: 수업 한 번에 충분
@@ -24,10 +24,12 @@ module.exports = async (req, res) => {
   try {
     let r = await ask(id, token), swapped = false;
     if (!r.ok) { const r2 = await ask(token, id); if (r2.ok) { r = r2; swapped = true; } } // 두 값을 서로 바꿔 넣은 경우도 받아 준다
+    const first = r.status;
+    if (!r.ok) { const r3 = await ask(id, token, 'generate'); if (r3.ok) r = r3; else if (r3.status !== first) r = r3; } // 예전 주소도 한 번 시도
     if (!r.ok) {
       // 원인을 짐작할 수 있게 값의 모양만 알려 준다 (값 자체는 내보내지 않는다)
       const shape = (v) => ({ length: v.length, hex: /^[0-9a-f]+$/i.test(v) });
-      res.status(200).json({ configured: false, error: `turn ${r.status}`, keyId: shape(id), apiToken: shape(token) });
+      res.status(200).json({ configured: false, error: `turn ${first}/${r.status}`, keyId: shape(id), apiToken: shape(token) });
       return;
     }
     const data = await r.json();
