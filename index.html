@@ -18,7 +18,7 @@ button:focus-visible,input:focus-visible{outline:2px solid #fff;outline-offset:2
 #lobby{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(13,17,16,.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);overflow:auto}
 .card{width:100%;max-width:380px;padding:22px;border-radius:22px;background:rgba(19,26,23,.88);border:1px solid rgba(255,255,255,.12)}
 .card h1{margin:0 0 4px;font-size:24px;font-weight:600}
-.card p.sub{margin:0 0 18px;font-size:13.5px;line-height:1.55;color:#c3cbc2}
+.card p.sub{margin:0 0 16px;font-size:13.5px;line-height:1.55;color:#c3cbc2}
 .tabs{display:flex;gap:6px;padding:4px;border-radius:999px;background:rgba(255,255,255,.07);margin-bottom:16px}
 .tabs button{flex:1;min-height:40px;border:0;border-radius:999px;background:transparent;font-size:14.5px}
 .tabs button[aria-selected="true"]{background:#e9e2cf;color:#17201b;font-weight:600}
@@ -100,6 +100,8 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
     </div>
     <label class="f" for="name">이름</label>
     <input class="t" id="name" maxlength="12" autocomplete="nickname" placeholder="수업에서 보일 이름">
+    <label class="f" id="avLabel">캐릭터</label>
+    <div class="row" id="lobbyAv" role="group" aria-labelledby="avLabel"></div>
     <div id="codeWrap">
       <label class="f" for="code">수업 코드</label>
       <input class="t code" id="code" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="ABC123">
@@ -119,6 +121,8 @@ const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
 const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 // neck: 목 위치(이미지 위에서부터의 비율). 이 위쪽이 고개 움직임을 따라간다.
 const AVATARS = [
+  { id: 'track', label: '트레이닝복', neck: 0.260 },
+  { id: 'home', label: '홈웨어', neck: 0.299 },
   { id: 'yoga', label: '요가복', neck: 0.283 },
   { id: 'hanbok', label: '생활한복', neck: 0.266 },
   { id: 'knit', label: '니트', neck: 0.285 },
@@ -420,7 +424,7 @@ function openSheet(kind) {
   if (kind === 'avatar') {
     sh.append(el('h2', null, '내 아바타'));
     const row = el('div', 'row');
-    for (const a of AVATARS) { const b = el('button', 'thumb av'); b.type = 'button'; b.setAttribute('aria-label', a.label); b.setAttribute('aria-pressed', String(a.id === S.avatar)); b.style.backgroundImage = `url(avatars/thumb-${a.id}.webp)`; b.addEventListener('click', () => { pickAvatar(a.id); sh.hidden = true; }); row.append(b); }
+    avatarRow(row, (id) => { pickAvatar(id); sh.hidden = true; });
     sh.append(row);
   } else {
     sh.append(el('h2', null, '배경 (모두에게 바뀝니다)'));
@@ -433,8 +437,20 @@ function openSheet(kind) {
   }
   sh.append(close);
 }
+function avatarRow(row, onPick) {
+  row.replaceChildren();
+  for (const a of AVATARS) {
+    const b = el('button', 'thumb av'); b.type = 'button'; b.title = a.label; b.setAttribute('aria-label', a.label); b.setAttribute('aria-pressed', String(a.id === S.avatar));
+    b.style.backgroundImage = `url(avatars/thumb-${a.id}.webp)`;
+    b.addEventListener('click', () => onPick(a.id));
+    row.append(b);
+  }
+  row.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
 function pickAvatar(id) {
-  S.avatar = id; setAvatar(S.myId, id);
+  S.avatar = id; try { localStorage.setItem('medclass-avatar', id); } catch (e) { /* 무시 */ }
+  if (!S.myId) return;
+  setAvatar(S.myId, id);
   if (S.role === 'host') cast({ t: 'avatar', id: S.myId, avatar: id }); else if (S.hostConn?.open) S.hostConn.send({ t: 'avatar', avatar: id });
 }
 async function startMic() {
@@ -550,7 +566,9 @@ function tick() {
 
 /* ---------- 시작 ---------- */
 window.__cls = { S, members, setMyPacket, enc, repose: () => { for (const m of members.values()) loadInst(m); } };
-try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; } catch (e) { /* 무시 */ }
+try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; const av = localStorage.getItem('medclass-avatar'); if (AVATARS.some((a) => a.id === av)) S.avatar = av; } catch (e) { /* 무시 */ }
+const lobbyPick = (id) => { pickAvatar(id); avatarRow($('#lobbyAv'), lobbyPick); };
+avatarRow($('#lobbyAv'), lobbyPick);
 const preset = new URLSearchParams(location.search).get('room');
 if (preset && /^[A-Za-z0-9]{6}$/.test(preset)) $('#code').value = preset.toUpperCase();
 setBg(S.bg); resize(); tick();
