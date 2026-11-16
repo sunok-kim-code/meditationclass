@@ -132,7 +132,7 @@ const AVATARS = [
   { id: 'hoodie', label: '후드티', neck: 0.262, split: 0.181, hx: -0.004, hw: 0.11, al: [-0.259, 0.059], ar: [0.254, 0.054], sh: 1.50 },
   { id: 'bear', label: '곰', neck: 0.318, split: 0.22, hx: 0.0, hw: 0.197, al: [-0.242, 0.053], ar: [0.238, 0.052], sh: 1.08 },
   { id: 'cat', label: '고양이', neck: 0.366, split: 0.252, hx: 0.007, hw: 0.208, al: [-0.216, 0.014], ar: [0.216, 0.017], sh: 1.09 },
-  { id: 'dog', label: '강아지', neck: 0.389, split: 0.267, hx: 0.001, hw: 0.272, al: [-0.262, 0.063], ar: [0.264, 0.065], sh: 1.08 },
+  { id: 'dog', label: '강아지', neck: 0.389, split: 0.267, hx: 0.001, hw: 0.272, hh: 0.125, al: [-0.262, 0.063], ar: [0.264, 0.065], sh: 1.08 },
   { id: 'penguin', label: '펭귄', neck: 0.339, split: 0.234, hx: -0.001, hw: 0.188, al: [-0.204, 0.117], ar: [0.203, 0.116], sh: 1.08 },
 ];
 // floor: 배경 그림에서 바닥이 시작되는 높이(위에서부터의 비율)
@@ -146,6 +146,7 @@ const MAX_GUESTS = 12, SEND_MS = 85, PREFIX = 'sunmedclass-';
 const HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 const GEST = [null, 'pray', 'both', 'both']; // 손동작 번호: 1 합장, 2 손 들기(한 손 또는 양손. 그림은 양손 든 그림 하나를 좌우로 나눠 쓴다)
 const AWAY_MS = 6000, TURN_S = 0.3, SIT_S = 0.8, STAND_H = 1.72;
+const HIGH = 9, HIGH_EXT = 0.4; // HIGH: 손을 머리 위로 높이 든 상태를 나타내는 값, HIGH_EXT: 그 그림이 기본 캔버스 위로 더 올라가는 높이
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp;
@@ -202,33 +203,39 @@ void main() {
 }`;
 // 얼굴(머리 폭 안쪽, 목 위)은 눈 뜬·감은·말하는 그림을 섞고, 그 밖의 몸은 기본 그림과 손동작 그림을 섞는다
 const FRAG = `
-uniform sampler2D tOpen; uniform sampler2D tClosed; uniform sampler2D tTalk; uniform sampler2D tPose;
-uniform float uBlink; uniform float uTalk; uniform vec2 uPose; uniform float uAlpha;
-uniform float uNeck; uniform float uSplit; uniform vec2 uHead;
+uniform sampler2D tOpen; uniform sampler2D tClosed; uniform sampler2D tTalk; uniform sampler2D tPose; uniform sampler2D tHigh;
+uniform float uBlink; uniform float uTalk; uniform vec2 uPose; uniform vec2 uHigh; uniform float uAlpha;
+uniform float uNeck; uniform float uSplit; uniform vec2 uHead; uniform float uHeadHi;
 varying vec2 vUv; varying vec2 vL;
 void main() {
   vec4 o = texture2D(tOpen, vUv);
   vec4 eyes = mix(o, texture2D(tClosed, vUv), uBlink);
   vec4 mouth = mix(o, texture2D(tTalk, vUv), uTalk);
   vec4 head = mix(mouth, eyes, smoothstep(uSplit - 0.012, uSplit + 0.012, vL.y));
-  vec4 body = mix(o, texture2D(tPose, vUv), mix(uPose.x, uPose.y, smoothstep(-0.03, 0.03, vL.x - uHead.x))); // 화면 왼쪽 팔과 오른쪽 팔을 따로 든다
-  float hm = smoothstep(uNeck - 0.004, uNeck + 0.028, vL.y) * (1.0 - smoothstep(uHead.y, uHead.y * 1.16, abs(vL.x - uHead.x)));
+  float sd = smoothstep(-0.03, 0.03, vL.x - uHead.x);
+  vec4 body = mix(o, texture2D(tPose, vUv), mix(uPose.x, uPose.y, sd)); // 화면 왼쪽 팔과 오른쪽 팔을 따로 든다
+  float hi = mix(uHigh.x, uHigh.y, sd);
+  body = mix(body, texture2D(tHigh, vUv), hi); // 머리 위로 높이 든 팔
+  float hw = mix(uHead.y, uHeadHi, hi); // 귀가 넓은 캐릭터는 든 팔이 귀 앞을 지나므로, 그때는 얼굴 폭만 기본 그림을 쓴다
+  float hm = smoothstep(uNeck - 0.004, uNeck + 0.028, vL.y) * (1.0 - smoothstep(hw, hw * 1.16, abs(vL.x - uHead.x)));
   gl_FragColor = mix(body, head, hm);
   gl_FragColor.a *= uAlpha;
   if (gl_FragColor.a < 0.01) discard;
   #include <colorspace_fragment>
 }`;
 
-// 앉은 그림(고개·몸 움직임, 눈·입 섞기, 좌우 팔 따로 들기) + 서 있는 그림 + 걷는 옆모습 두 장
+// 앉은 그림(고개·몸 움직임, 눈·입 섞기, 좌우 팔 따로 들기, 머리 위로 뻗기) + 서 있는 그림 + 걷는 옆모습 네 장
 async function makeAvatar(defId) {
   const def = AVATARS.find((a) => a.id === defId) || AVATARS[0];
   const opt = (name) => loadTex(`avatars/${def.id}-${name}.webp`).catch(() => null);
-  const [tOpen, tClosed, tStand, tTalk, tW1, tW2, tW3] = await Promise.all([
-    loadTex(`avatars/${def.id}-open.webp`), loadTex(`avatars/${def.id}-closed.webp`), opt('stand'), opt('talk'), opt('walk1'), opt('walk2'), opt('walk3'),
+  const [tOpen, tClosed, tStand, tTalk, ...tWk] = await Promise.all([
+    loadTex(`avatars/${def.id}-open.webp`), loadTex(`avatars/${def.id}-closed.webp`), opt('stand'), opt('talk'), opt('wk1'), opt('wk2'), opt('wk3'), opt('wk4'),
   ]);
+  const four = tWk.every(Boolean); // 걸음 네 단계 그림이 다 있으면 그것을 쓰고, 없으면 예전 세 장으로 걷는다
+  const [tW1, tW2, tW3] = four ? [] : await Promise.all([opt('walk1'), opt('walk2'), opt('walk3')]);
   const W = tOpen.image.width / tOpen.image.height;
   const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthTest: false,
-    uniforms: { tOpen: { value: tOpen }, tClosed: { value: tClosed }, tTalk: { value: tTalk || tOpen }, tPose: { value: tOpen }, uBlink: { value: 0 }, uTalk: { value: 0 }, uPose: { value: new THREE.Vector2() }, uAlpha: { value: 1 }, uRot: { value: new THREE.Vector3() }, uLean: { value: new THREE.Vector2() }, uNeck: { value: 0.5 - def.neck }, uSplit: { value: 0.5 - def.split }, uHead: { value: new THREE.Vector2(def.hx, def.hw) }, uBreath: { value: 0 }, uW: { value: W } } });
+    uniforms: { tOpen: { value: tOpen }, tClosed: { value: tClosed }, tTalk: { value: tTalk || tOpen }, tPose: { value: tOpen }, tHigh: { value: tOpen }, uBlink: { value: 0 }, uTalk: { value: 0 }, uPose: { value: new THREE.Vector2() }, uHigh: { value: new THREE.Vector2() }, uAlpha: { value: 1 }, uRot: { value: new THREE.Vector3() }, uLean: { value: new THREE.Vector2() }, uNeck: { value: 0.5 - def.neck }, uSplit: { value: 0.5 - def.split }, uHead: { value: new THREE.Vector2(def.hx, def.hw) }, uHeadHi: { value: def.hh || def.hw }, uBreath: { value: 0 }, uW: { value: W } } });
   const body = new THREE.Mesh(new THREE.PlaneGeometry(W, 1, 24, 48), mat);
   body.position.y = 0.5;
   const shMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthTest: false });
@@ -242,14 +249,26 @@ async function makeAvatar(defId) {
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(W, 1), m);
     mesh.position.set(-el[0], -el[1], 0);
     const g = new THREE.Group(); g.add(mesh); g.visible = false; root.add(g);
-    return { side, el, m, mesh, g, k: 0, a: 1.55, v: 0, goal: 0 };
+    return { side, el, m, mesh, g, k: 0, kh: 0, a: 1.55, v: 0, goal: 0 };
   });
+  // 머리 위로 뻗은 팔은 앉은 그림 캔버스보다 위로 올라가므로, 그 윗부분을 좌우 반쪽씩 따로 얹는다
+  const topS = new THREE.Group(), topR = new THREE.Group(); topS.add(topR); topS.visible = false; root.add(topS);
+  const tops = [-1, 1].map((side) => {
+    const x0 = side < 0 ? -W / 2 : def.hx, x1 = side < 0 ? def.hx : W / 2;
+    const geo = new THREE.PlaneGeometry(x1 - x0, HIGH_EXT), uv = geo.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setX(i, (lerp(x0, x1, uv.getX(i)) + W / 2) / W);
+    const m = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, opacity: 0 });
+    const mesh = new THREE.Mesh(geo, m); mesh.position.x = (x0 + x1) / 2; topR.add(mesh);
+    return { m, mesh };
+  });
+  let hasHigh = false;
   // 서 있는 그림과 걷는 그림은 발바닥이 바닥(y=0)에 닿게 놓는다
   const SH = def.sh || STAND_H; // 앉은 키를 1로 봤을 때 선 키 (머리 크기가 앉은 그림과 같아지게 맞춘 값)
   const flat = (tx) => { if (!tx) return null; const m = new THREE.MeshBasicMaterial({ map: tx, transparent: true, depthTest: false }); const mesh = new THREE.Mesh(new THREE.PlaneGeometry(SH * tx.image.width / tx.image.height, SH), m); mesh.visible = false; root.add(mesh); return { m, mesh }; };
-  const stand = flat(tStand), walks = tW1 && tW2 ? [flat(tW1), flat(tW2), flat(tW3)] : null;
-  // 걸음 순서: 한 발 내딛기 → 다리 모으기 → 반대 발 내딛기 → 다리 모으기 (모으는 그림이 없으면 내딛는 두 장만 번갈아)
-  const cycle = walks && walks[2] ? [0, 2, 1, 2] : [0, 1];
+  const stand = flat(tStand), walks = four ? tWk.map(flat) : tW1 && tW2 ? [flat(tW1), flat(tW2), flat(tW3)] : null;
+  // 걸음 순서(네 장): 발 딛기 → 체중 싣기 → 다리 모으기 → 밀어내기. 한 걸음마다 되풀이한다
+  // 예전 그림(세 장): 한 발 내딛기 → 다리 모으기 → 반대 발 내딛기 → 다리 모으기
+  const cycle = four ? [0, 1, 2, 3] : walks && walks[2] ? [0, 2, 1, 2] : [0, 1];
   root.visible = false;
   let poseName = null, poseBusy = false, kPray = 0;
   return {
@@ -265,21 +284,28 @@ async function makeAvatar(defId) {
         if (!anyK && !poseBusy) {
           poseBusy = true;
           const files = want === 'both' ? ['bothb', 'arml', 'armr'] : ['pray'];
-          Promise.all(files.map((f) => loadTex(`avatars/${def.id}-${f}.webp`))).then(([tb, tl, tr]) => {
+          const extra = want === 'both' && !hasHigh ? [opt('highb'), opt('hightop')] : [];
+          Promise.all([...files.map((f) => loadTex(`avatars/${def.id}-${f}.webp`)), ...extra]).then(([tb, tl, tr, th, tt]) => {
             u.tPose.value = tb; [tl, tr].forEach((tx, i) => { if (tx && arms[i]) { arms[i].m.map = tx; arms[i].m.needsUpdate = true; } }); poseName = want;
+            if (th && tt) { u.tHigh.value = th; tops.forEach((tp) => { tp.m.map = tt; tp.m.needsUpdate = true; }); hasHigh = true; }
           }).catch(() => {}).finally(() => { poseBusy = false; });
         }
       } else if (want === 'pray') tPray = 1;
       else if (want === 'both') { tArm[0] = hands[0] != null ? 1 : 0; tArm[1] = hands[1] != null ? 1 : 0; }
       const ramp = (k, to) => clamp(k + Math.sign(to - k) * dt * 3.2, Math.min(k, to), Math.max(k, to));
       kPray = ramp(kPray, tPray);
-      const pw = [0, 0];
+      const pw = [0, 0], ph = [0, 0];
       arms.forEach((x, i) => {
         if (!x) return;
         x.k = ramp(x.k, tArm[i]);
-        if (hands[i] != null) x.goal = hands[i];
+        const hi = hands[i] === HIGH;
+        if (hands[i] != null) x.goal = hi ? -0.12 : hands[i]; // 높이 들 때는 팔뚝을 먼저 곧게 세운다
         const on = poseName === 'both' && x.k > 0.001;
         pw[i] = on ? clamp(x.k / 0.45, 0, 1) : 0;
+        // 팔뚝이 거의 다 올라온 뒤에 머리 위로 쭉 뻗은 그림으로 넘어간다
+        const toH = on && hi && hasHigh && x.k > 0.8 ? 1 : 0;
+        x.kh = clamp(x.kh + Math.sign(toH - x.kh) * dt * 4.5, 0, 1);
+        const eh = on ? ease(x.kh) : 0; ph[i] = eh;
         // 팔뚝: 옆으로 내린 각도(1.55)에서 올라와 손 위치를 따라간다. 약한 스프링으로 살짝 출렁이게 한다
         const goal = on ? lerp(1.55, x.goal, ease(x.k)) : 1.55;
         for (let left = dt; left > 0; left -= 1 / 120) { const h = Math.min(left, 1 / 120); x.v += ((goal - x.a) * 130 - x.v * 15) * h; x.a += x.v * h; } // 화면이 느려도 튀지 않게 잘게 나눠 계산
@@ -290,12 +316,12 @@ async function makeAvatar(defId) {
           const rx = x.el[0], ry = (x.el[1] + 0.27) * (1 - 0.07 * p.lean.y * wl), cl = Math.cos(la), sl = Math.sin(la);
           x.g.position.set(cl * rx - sl * ry, body.position.y + sl * rx + cl * ry - 0.27, 0); // 상체가 기울면 팔꿈치도 같이 따라간다
           x.g.rotation.z = -x.side * x.a + la;
-          x.m.opacity = clamp(x.k / 0.25, 0, 1) * seat;
+          x.m.opacity = clamp(x.k / 0.25, 0, 1) * seat * (1 - eh);
           x.mesh.renderOrder = order + 2;
         }
       });
       if (poseName === 'pray') pw[0] = pw[1] = ease(kPray);
-      u.uPose.value.set(pw[0], pw[1]);
+      u.uPose.value.set(pw[0], pw[1]); u.uHigh.value.set(ph[0], ph[1]);
       u.uTalk.value = tTalk ? p.talk : 0;
       u.uRot.value.set(p.euler.x, p.euler.y, p.euler.z);
       u.uLean.value.set(p.lean.x, p.lean.y);
@@ -303,6 +329,14 @@ async function makeAvatar(defId) {
       u.uBlink.value = clamp((Math.max(p.blend.eyeBlinkLeft || 0, p.blend.eyeBlinkRight || 0) - 0.25) / 0.35, 0, 1);
       u.uAlpha.value = seat; body.visible = seat > 0.01;
       body.position.y = 0.5 + (1 - squat) * 0.16;
+      // 캔버스 위로 올라간 팔: 상체 기울기와 숨쉬기를 몸과 똑같이 따라간다
+      topS.visible = hasHigh && seat > 0.01 && (ph[0] > 0.004 || ph[1] > 0.004);
+      if (topS.visible) {
+        const br = u.uBreath.value;
+        topS.position.set(0, body.position.y - 0.27, 0); topS.scale.y = 1 - 0.07 * p.lean.y;
+        topR.rotation.z = -p.lean.x * 0.24; topR.scale.x = 1 + br * 0.004;
+        tops.forEach((tp, i) => { tp.mesh.visible = ph[i] > 0.004; tp.m.opacity = ph[i] * seat; tp.mesh.position.y = 0.77 + HIGH_EXT / 2 + br * 0.006; tp.mesh.renderOrder = order + 1; });
+      }
       shMat.opacity = Math.max(seat, up, walk); sh.visible = shMat.opacity > 0.01;
       sh.renderOrder = order; body.renderOrder = order + 1;
       if (stand) {
@@ -314,7 +348,7 @@ async function makeAvatar(defId) {
       if (walks) {
         // 걸음에 맞춰 그림을 바꾸고, 다리가 모일 때 몸이 살짝 올라간다
         const per = cycle.length === 4 ? Math.PI / 2 : Math.PI;
-        const f = cycle[Math.floor((step + per / 2) / per) % cycle.length], bob = Math.abs(Math.sin(step)) * 0.022;
+        const f = cycle[Math.floor((step + (four ? 0 : per / 2)) / per) % cycle.length], bob = four ? 0 : Math.abs(Math.sin(step)) * 0.022; // 네 장짜리는 그림에 몸 높낮이가 들어 있다
         walks.forEach((wk, i) => {
           if (!wk) return;
           wk.mesh.visible = walk > 0.01 && i === f; wk.m.opacity = walk; wk.mesh.renderOrder = order + 1;
@@ -325,6 +359,7 @@ async function makeAvatar(defId) {
     dispose() {
       scene.remove(root); body.geometry.dispose(); mat.dispose(); sh.geometry.dispose(); shMat.dispose();
       for (const x of arms) if (x) { x.mesh.geometry.dispose(); x.m.dispose(); }
+      for (const tp of tops) { tp.mesh.geometry.dispose(); tp.m.dispose(); }
       for (const f of [stand, ...(walks || [])]) if (f) { f.mesh.geometry.dispose(); f.m.dispose(); }
     },
   };
@@ -442,9 +477,9 @@ function place() {
 }
 
 /* ---------- 표정·몸 데이터 ---------- */
-// 패킷: [[고개 x,y,z], [표정 0~100 ...], [몸 기울기 x,y (-100~100)], 손동작 번호, [화면 왼쪽 손 각도, 오른쪽 손 각도] (바깥쪽 +, 100배. 안 든 손은 999)]
-const encA = (v) => (v == null ? 999 : Math.round(v * 100));
-const decA = (v) => (typeof v === 'number' && v !== 999 ? clamp(v / 100, -0.6, 1.3) : null);
+// 패킷: [[고개 x,y,z], [표정 0~100 ...], [몸 기울기 x,y (-100~100)], 손동작 번호, [화면 왼쪽 손 각도, 오른쪽 손 각도] (바깥쪽 +, 100배. 안 든 손은 999, 머리 위로 높이 든 손은 998)]
+const encA = (v) => (v == null ? 999 : v === HIGH ? 998 : Math.round(v * 100));
+const decA = (v) => (typeof v !== 'number' || v === 999 ? null : v === 998 ? HIGH : clamp(v / 100, -0.6, 1.3));
 const enc = (blend, e, lean, g, hl, hr) => [[+e.x.toFixed(3), +e.y.toFixed(3), +e.z.toFixed(3)], KEYS.map((k) => Math.round((blend[k] || 0) * 100)), [Math.round(lean.x * 100), Math.round(lean.y * 100)], g | 0, [encA(hl), encA(hr)]];
 function applyPacket(mem, pk, mirror) {
   const [e, b, l] = pk, blend = {};
@@ -464,7 +499,7 @@ function applyPacket(mem, pk, mirror) {
 /* ---------- 얼굴 추적 ---------- */
 const cam = $('#cam');
 let landmarker = null, hands = null, lastVT = -1, myPacket = null, myPacketAt = 0, lastFace = 0, baseX = null, baseY = null;
-let lastHand = 0, myG = 0, myHL = null, myHR = null; const handPrev = [0, 0, 0];
+let lastHand = 0, myG = 0, myHL = null, myHR = null; const handPrev = [0, 0, 0], hiSt = [false, false], hiAt = [0, 0], hiY = [1, 1];
 const m4 = new THREE.Matrix4(), tmpE = new THREE.Euler(), tmpL = new THREE.Vector2();
 async function startCamera() {
   try {
@@ -485,7 +520,7 @@ async function startCamera() {
     return true;
   } catch (err) { console.warn(err); S.camOn = false; return false; }
 }
-function stopCamera() { cam.srcObject?.getTracks().forEach((t) => t.stop()); cam.srcObject = null; S.camOn = false; myPacket = null; myG = 0; myHL = myHR = null; iAmAway(false); }
+function stopCamera() { cam.srcObject?.getTracks().forEach((t) => t.stop()); cam.srcObject = null; S.camOn = false; myPacket = null; myG = 0; myHL = myHR = null; hiSt[0] = hiSt[1] = false; iAmAway(false); }
 function track(now) {
   if (!S.camOn || !landmarker) return;
   if (cam.readyState >= 2 && cam.currentTime !== lastVT) {
@@ -522,9 +557,15 @@ function readHands(fl, now) {
       if (palms.length >= 2 && Math.hypot(palms[0].x - palms[1].x, (palms[0].y - palms[1].y) * ar) < fw && palms.every((p) => p.y > chin - (fw / ar) * 0.2 && Math.abs(p.x - fx) < fw * 0.9)) pray = 1;
       else if (palms.length === 1 && Math.abs(palms[0].x - fx) < fw * 0.45 && palms[0].y > chin && palms[0].h[12].y < palms[0].h[0].y) pray = 1; // 맞댄 손은 한 손으로 잡히기도 한다
       if (!pray) {
+        // 머리 위로 높이 든 손: 손바닥이 정수리보다 위에 있다. 한번 올리면 조금 내려와도 유지한다(떨림 방지)
+        const topY = fl[10].y, lift = (p) => ((topY - p.y) * ar) / fw;
+        const highs = palms.filter((p) => lift(p) > (hiSt[p.x < fx ? 0 : 1] ? -0.3 : 0.1)).sort((a, b) => a.x - b.x);
+        highs.forEach((p, k) => { const i = highs.length === 2 ? k : p.x < fx ? 0 : 1; up[i] = HIGH; hiAt[i] = now; hiY[i] = p.y; });
         for (const p of palms) {
+          if (highs.includes(p)) continue;
           if ((p.y - chin) * ar >= fw * 0.8 || Math.abs(p.x - fx) <= fw * 0.55) continue; // 어깨 아래이거나 얼굴 앞이면 든 것으로 보지 않는다
           const sgn = p.x < fx ? -1 : 1, i = sgn < 0 ? 0 : 1;
+          if (up[i] === HIGH) continue;
           const vx = sgn * (p.x - (fx + sgn * 1.5 * fw)), vy = chin * ar + 1.3 * fw - p.y * ar;
           const ang = clamp(Math.atan2(vx, Math.max(vy, 0.02)), -0.6, 1.3);
           if (up[i] == null || ang < up[i]) up[i] = ang;
@@ -532,6 +573,8 @@ function readHands(fl, now) {
       }
     }
   } catch (e) { /* 다음에 다시 */ }
+  // 손을 쭉 뻗으면 화면 위로 벗어나 안 보이기 쉽다. 화면 맨 위에서 사라진 손은 다시 보일 때까지(최대 8초) 든 것으로 본다
+  for (let i = 0; i < 2; i++) { if (!pray && up[i] == null && hiSt[i] && hiY[i] < 0.16 && now - hiAt[i] < 8000) up[i] = HIGH; hiSt[i] = up[i] === HIGH; }
   // 켜고 끄는 것은 두 번 연속 같은 결과일 때만 바꾸고(깜빡임 방지), 각도는 바로 따라간다
   const cur = [pray, up[0] != null ? 1 : 0, up[1] != null ? 1 : 0];
   const st = [myG === 1 ? 1 : 0, myHL != null ? 1 : 0, myHR != null ? 1 : 0];
@@ -967,7 +1010,7 @@ function tick() {
 }
 
 /* ---------- 시작 ---------- */
-window.__cls = { S, members, addMember, removeMember, setAway, setMyPacket, enc };
+window.__cls = { S, members, addMember, removeMember, setAway, setAvatar, setMyPacket, enc };
 try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; const av = localStorage.getItem('medclass-avatar'); if (AVATARS.some((a) => a.id === av)) S.avatar = av; } catch (e) { /* 무시 */ }
 const lobbyPick = (id) => { pickAvatar(id); avatarRow($('#lobbyAv'), lobbyPick); };
 avatarRow($('#lobbyAv'), lobbyPick);
