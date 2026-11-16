@@ -250,7 +250,7 @@ async function makeAvatar(defId) {
 }
 
 /* ---------- 상태 ---------- */
-const S = { role: null, code: '', myId: null, name: '', avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)].id, bg: BGS[0].id, peer: null, hostConn: null, conns: new Map(), calls: new Map(), mic: null, micOn: true, bowl: false, camOn: false, away: false, ended: false };
+const S = { role: null, code: '', myId: null, name: '', avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)].id, bg: BGS[0].id, peer: null, hostConn: null, conns: new Map(), calls: new Map(), mic: null, micOn: true, bowl: false, camOn: false, away: false, awayOn: true, ended: false };
 const members = new Map(); // id -> { id, name, avatar, host, away, slot, inst, st, t0, seat, cur, pose, target, lastSeen }
 let order = [];            // 자리 순서(진행자 먼저)
 const ghosts = [];         // 나간 뒤 걸어 나가는 중인 사람
@@ -343,11 +343,12 @@ function place() {
     if (!mem.cur) mem.cur = { x, base, h };
     Object.assign(mem.slot.style, { left: `${x - w / 2}px`, top: `${base - h}px`, width: `${w}px`, height: `${h}px`, zIndex: String(Math.round(base)) });
   };
-  const fF = H * (n <= 3 ? 0.25 : n <= 6 ? 0.21 : n <= 9 ? 0.18 : 0.155);
+  let fF = H * (n <= 3 ? 0.25 : n <= 6 ? 0.21 : n <= 9 ? 0.18 : 0.155);
   const yFront = barTop - 20;
   // 진행자는 바닥선 바로 아래(바닥 위)에 앉는다
   const hostBase = clamp(floorLine() + H * 0.04, topEnd + H * 0.2, yFront - fF * 0.45);
-  const hostH = Math.min(H * (n <= 3 ? 0.4 : n <= 8 ? 0.34 : 0.29), hostBase - topEnd - 6);
+  if (n) fF = Math.min(fF, (yFront - hostBase) / 0.78); // 맨 앞 참가자가 진행자를 많이 가리지 않게
+  const hostH = Math.min(fF, hostBase - topEnd - 6); // 진행자도 참가자와 같은 크기
   if (host) put(host, cx, hostBase, hostH);
   const yBack = Math.min(hostBase + fF * 0.3, yFront - fF * 0.2);
   const tMax = THREE.MathUtils.degToRad(Math.min(95, 28 + 13 * n));
@@ -416,7 +417,7 @@ function track(now) {
       setMyPacket(enc(blend, tmpE, tmpL));
     }
   }
-  if (S.role !== 'host' && now - lastFace > AWAY_MS) iAmAway(true); // 진행자는 목소리로 계속 진행하므로 자리 비움 처리하지 않는다
+  if (S.awayOn && S.role !== 'host' && now - lastFace > AWAY_MS) iAmAway(true); // 진행자는 목소리로 계속 진행하므로 자리 비움 처리하지 않는다
 }
 function setMyPacket(pk) { myPacket = pk; myPacketAt = performance.now(); const me = members.get(S.myId); if (me) applyPacket(me, pk, true); }
 // 카메라에 얼굴이 한동안 안 보이면 자리를 비운 것으로 알린다
@@ -457,14 +458,14 @@ function onHostData(conn, msg) {
     if (S.conns.size >= MAX_GUESTS) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 300); return; }
     const m = { id, name: String(msg.name || '참가자').slice(0, 12), avatar: AVATARS.some((a) => a.id === msg.avatar) ? msg.avatar : AVATARS[0].id, host: false };
     S.conns.set(id, conn);
-    conn.send({ t: 'room', you: id, bg: S.bg, members: [...roster(), m] });
+    conn.send({ t: 'room', you: id, bg: S.bg, awayOn: S.awayOn, members: [...roster(), m] });
     addMember(m, true);
     cast({ t: 'join', m }, id);
     if (S.mic) S.calls.set(id, S.peer.call(id, S.mic));
   } else if (!S.conns.has(id)) return;
   else if (msg.t === 'p' && Array.isArray(msg.k)) { const mem = members.get(id); if (mem) { applyPacket(mem, msg.k, false); mem.raw = msg.k; } }
   else if (msg.t === 'avatar' && AVATARS.some((a) => a.id === msg.avatar)) { setAvatar(id, msg.avatar); cast({ t: 'avatar', id, avatar: msg.avatar }); }
-  else if (msg.t === 'away') { setAway(id, !!msg.v); cast({ t: 'away', id, v: !!msg.v }, id); }
+  else if (msg.t === 'away') { const v = !!msg.v && S.awayOn; setAway(id, v); cast({ t: 'away', id, v }, id); }
 }
 function joinRoom(code) {
   return new Promise((resolve, reject) => {
@@ -485,12 +486,13 @@ function joinRoom(code) {
       conn.on('data', (msg) => {
         if (!msg || typeof msg !== 'object') return;
         if (msg.t === 'full') { clearTimeout(timer); fail('수업 정원이 가득 찼습니다.'); }
-        else if (msg.t === 'room') { clearTimeout(timer); done = true; S.peer = peer; S.hostConn = conn; S.code = code; S.myId = id; setBg(msg.bg); for (const m of msg.members || []) addMember(m, m.id === id); resolve(); }
+        else if (msg.t === 'room') { clearTimeout(timer); done = true; S.peer = peer; S.hostConn = conn; S.code = code; S.myId = id; S.awayOn = msg.awayOn !== false; setBg(msg.bg); for (const m of msg.members || []) addMember(m, m.id === id); resolve(); }
         else if (msg.t === 'join') addMember(msg.m, true);
         else if (msg.t === 'leave') removeMember(msg.id);
         else if (msg.t === 'avatar') setAvatar(msg.id, msg.avatar);
         else if (msg.t === 'away') { if (msg.id !== S.myId) setAway(msg.id, !!msg.v); }
         else if (msg.t === 'bg') setBg(msg.bg);
+        else if (msg.t === 'cfg') { S.awayOn = msg.awayOn !== false; if (!S.awayOn) { lastFace = performance.now(); iAmAway(false); } }
         else if (msg.t === 'ps') { for (const pid in msg.a) { if (pid === S.myId) continue; const mem = members.get(pid); if (mem) applyPacket(mem, msg.a[pid], false); } }
         else if (msg.t === 'end') endClass('진행자가 수업을 마쳤습니다. 함께해 주셔서 고맙습니다.');
       });
@@ -562,8 +564,18 @@ function openSheet(kind) {
     const row2 = el('div', 'row'), bowl = el('button', 'chip', '싱잉볼 모드 (잡음 제거 끔)'); bowl.type = 'button'; bowl.setAttribute('aria-pressed', String(S.bowl));
     bowl.addEventListener('click', async () => { S.bowl = !S.bowl; await startMic(); openSheet('host'); });
     row2.append(bowl); sh.append(row2);
+    sh.append(el('h2', null, '참가자'));
+    const row3 = el('div', 'row'), aw = el('button', 'chip', '카메라에 안 보이면 자리 비움'); aw.type = 'button'; aw.setAttribute('aria-pressed', String(S.awayOn));
+    aw.addEventListener('click', () => { setAwayOn(!S.awayOn); openSheet('host'); });
+    row3.append(aw); sh.append(row3);
   }
   sh.append(close);
+}
+// 진행자 스위치: 끄면 자리를 비웠던 사람이 모두 돌아와 앉고, 이후로는 얼굴이 안 보여도 그대로 앉아 있는다 (누워서 하는 수련 등)
+function setAwayOn(v) {
+  S.awayOn = v; cast({ t: 'cfg', awayOn: v });
+  if (!v) for (const m of members.values()) if (m.away) { setAway(m.id, false); cast({ t: 'away', id: m.id, v: false }); }
+  say(v ? '자리 비움 표시 켬' : '자리 비움 표시 끔 · 모두 앉은 채로 표시됩니다');
 }
 function pickAvatar(id) {
   S.avatar = id; try { localStorage.setItem('medclass-avatar', id); } catch (e) { /* 무시 */ }
