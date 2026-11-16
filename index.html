@@ -531,6 +531,7 @@ function openHost(tries = 0) {
     });
     peer.on('disconnected', () => { if (!S.ended) { say('연결 서버에 다시 붙는 중… 그동안 새 참가자는 들어올 수 없습니다', true); relink(); } });
     peer.on('connection', (conn) => {
+      if (!S.conns.has(conn.peer)) { say('참가 요청을 받았습니다. 연결하는 중…'); setTimeout(() => { if (!S.ended && S.peer && !S.peer.disconnected) hostStatus(); }, 6000); }
       conn.on('data', (msg) => onHostData(conn, msg));
       conn.on('close', () => { if (!S.conns.has(conn.peer)) return; S.conns.delete(conn.peer); S.calls.get(conn.peer)?.close(); S.calls.delete(conn.peer); removeMember(conn.peer); cast({ t: 'leave', id: conn.peer }); });
     });
@@ -562,19 +563,31 @@ function onHostData(conn, msg) {
 }
 function joinRoom(code) {
   return new Promise((resolve, reject) => {
-    const peer = new Peer({ config: ICE }); let done = false, tries = 0, conn = null, found = false, blockT = null;
+    const peer = new Peer({ config: ICE }); let done = false, tries = 0, conn = null, found = false, blockT = null, waits = 0, diag = '';
     const fail = (m) => { if (done) return; done = true; clearTimeout(timer); clearTimeout(blockT); peer.destroy(); reject(new Error(m)); };
     const BLOCKED = '수업은 찾았지만 기기끼리 연결이 막혔습니다. 진행자와 참가자가 서로 다른 통신망(예: LTE와 와이파이)일 때 생깁니다.' + (hasRelay ? ' 잠시 뒤 다시 시도해 주세요.' : ' 같은 와이파이에서는 됩니다. 다른 통신망끼리 쓰려면 중계 서버 설정이 필요합니다.');
-    const timer = setTimeout(() => fail(found ? BLOCKED : tries > 1 ? NOT_FOUND : '연결 서버에 닿지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.'), 32000);
+    const SILENT = '수업은 찾았지만 진행자 기기가 응답하지 않습니다. 진행자의 화면이 꺼졌거나 다른 앱·탭으로 넘어가 있으면 이렇게 됩니다. 진행자가 수업 화면을 켜 둔 상태에서 다시 시도해 주세요.';
+    const timer = setTimeout(() => fail((found ? BLOCKED : tries > 1 ? NOT_FOUND : '연결 서버에 닿지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.') + diag), 75000);
     const NOT_FOUND = '수업을 찾지 못했습니다. 코드가 맞는지, 진행자의 수업 화면이 켜져 있는지 확인해 주세요. 진행자가 다른 앱이나 탭으로 넘어가 있으면 찾을 수 없습니다.';
     const knock = () => {
       if (done) return;
       tries++;
-      if (tries > 1) $('#enter').textContent = `진행자를 찾는 중… (${tries})`;
+      if (tries > 1 && !found) $('#enter').textContent = `진행자를 찾는 중… (${tries})`;
       conn = peer.connect(hostPeerId(code), { reliable: true });
-      // 3초 안에 '없는 수업' 응답이 없으면 수업은 있는 것. 그 뒤로도 연결이 안 열리면 기기 사이 경로가 막힌 것이다
-      const mine = conn; clearTimeout(blockT);
-      blockT = setTimeout(() => { if (done || conn !== mine) return; found = true; $('#enter').textContent = '수업을 찾았습니다. 연결하는 중…'; blockT = setTimeout(() => { if (!done && conn === mine && !mine.open) fail(BLOCKED); }, 15000); }, 3000);
+      // 3초 안에 '없는 수업' 응답이 없으면 수업은 있는 것. 그 뒤로도 연결이 안 열리면, 진행자가 응답을 했는지와 연결 경로 상태를 보고 원인을 가른다
+      const mine = conn; let relay = false; clearTimeout(blockT);
+      try { mine.peerConnection?.addEventListener('icecandidate', (e) => { if (e.candidate && / typ relay /.test(e.candidate.candidate)) relay = true; }); } catch (e) { /* 진단용 */ }
+      blockT = setTimeout(() => {
+        if (done || conn !== mine) return;
+        found = true; $('#enter').textContent = '수업을 찾았습니다. 연결하는 중…';
+        blockT = setTimeout(() => {
+          if (done || conn !== mine || mine.open) return;
+          const pc = mine.peerConnection, answered = !!(pc && pc.remoteDescription), ice = pc ? pc.iceConnectionState : 'none';
+          diag = ` [진단 ${answered ? '응답O' : '응답X'}·${ice}·${relay ? '중계O' : '중계X'}·${waits + 1}회]`;
+          if (++waits < 4) { try { mine.close(); } catch (e) { /* 무시 */ } $('#enter').textContent = answered ? `연결 경로를 다시 찾는 중… (${waits + 1})` : `진행자 응답을 기다리는 중… (${waits + 1})`; knock(); }
+          else fail((answered ? BLOCKED : SILENT) + diag);
+        }, 11000);
+      }, 3000);
       conn.on('open', () => { clearTimeout(blockT); conn.send({ t: 'hello', name: S.name, avatar: S.avatar }); });
       conn.on('data', onData);
       conn.on('close', () => { if (done && S.hostConn === conn) endClass('수업과의 연결이 끊겼습니다. 수업이 끝났거나 네트워크가 불안정할 수 있습니다.'); });
