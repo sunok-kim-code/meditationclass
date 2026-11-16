@@ -27,6 +27,7 @@ input.t{width:100%;min-height:48px;padding:0 14px;border-radius:12px;border:1px 
 input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 .primary{width:100%;min-height:52px;margin-top:18px;border:0;border-radius:999px;background:#e9e2cf;color:#17201b;font-size:16px;font-weight:600}
 .primary:disabled{opacity:.6}
+.ghost{width:100%;min-height:44px;margin-top:8px;border:0;border-radius:999px;background:transparent;color:#c9d1c8;font-size:14px;text-decoration:underline}
 .note{margin:12px 2px 0;font-size:12px;line-height:1.5;color:#aab3a9}
 .err{margin:12px 2px 0;font-size:13px;line-height:1.5;color:#ffb4a8}
 
@@ -105,6 +106,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
       <input class="t code" id="code" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="ABC123">
     </div>
     <button class="primary" id="enter" type="button">참가하기</button>
+    <button class="ghost" id="fresh" type="button" hidden>새 코드로 수업 열기</button>
     <p class="note" id="lobbyNote">입장할 때 카메라 사용을 묻습니다. 허용하지 않아도 참가할 수 있고, 그 경우 아바타는 가만히 앉아 있습니다.</p>
     <p class="err" id="lobbyErr" role="alert" hidden></p>
   </div>
@@ -520,20 +522,29 @@ const roster = () => [...members.values()].map((m) => ({ id: m.id, name: m.name,
 const cast = (msg, except) => { for (const [id, c] of S.conns) if (id !== except && c.open) c.send(msg); };
 const micConstraints = () => ({ audio: S.bowl ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
 
-function openHost(tries = 0) {
+// 진행자가 창을 닫았다 다시 열어도 같은 코드로 이어갈 수 있게, 열어 둔 수업을 이 기기에 기억해 둔다
+const HOST_KEY = 'medclass-host', HOST_KEEP_MS = 8 * 3600 * 1000;
+function savedHost() { try { const d = JSON.parse(localStorage.getItem(HOST_KEY) || 'null'); return d && /^[A-Z0-9]{6}$/.test(d.code) && Date.now() - d.t < HOST_KEEP_MS ? d : null; } catch (e) { return null; } }
+function saveHost() { try { localStorage.setItem(HOST_KEY, JSON.stringify({ code: S.code, bg: S.bg, awayOn: S.awayOn, t: Date.now() })); } catch (e) { /* 무시 */ } }
+function forgetHost() { try { localStorage.removeItem(HOST_KEY); } catch (e) { /* 무시 */ } }
+// fixed: 이어갈 코드. 주면 그 코드가 비워질 때까지 기다렸다 다시 잡고, 없으면 새 코드를 만든다
+function openHost(fixed, tries = 0) {
   return new Promise((resolve, reject) => {
-    const code = newCode(), peer = new Peer(hostPeerId(code), { config: ICE });
+    const code = fixed || newCode(), peer = new Peer(hostPeerId(code), { config: ICE });
     peer.on('open', (id) => { if (S.peer === peer) { hostStatus(); return; } S.peer = peer; S.code = code; S.myId = id; resolve(); });
     peer.on('error', (err) => {
       if (S.peer === peer) { if (!S.ended && ['network', 'disconnected', 'server-error', 'socket-error', 'socket-closed', 'unavailable-id'].includes(err.type)) { say('연결 서버에 다시 붙는 중… 그동안 새 참가자는 들어올 수 없습니다', true); setTimeout(relink, 2500); } return; }
       peer.destroy();
-      if (err.type === 'unavailable-id' && tries < 3) openHost(tries + 1).then(resolve, reject); else reject(err);
+      // 방금 닫은 창의 연결이 서버에 잠깐 남아 있으면 같은 코드를 바로 못 잡는다. 이어가기일 때는 풀릴 때까지 기다린다
+      if (err.type === 'unavailable-id' && fixed && tries < 20) { $('#enter').textContent = `이전 연결이 정리되기를 기다리는 중… (${tries + 1})`; setTimeout(() => openHost(fixed, tries + 1).then(resolve, reject), 2500); }
+      else if (err.type === 'unavailable-id' && !fixed && tries < 3) openHost(null, tries + 1).then(resolve, reject);
+      else reject(err);
     });
     peer.on('disconnected', () => { if (!S.ended) { say('연결 서버에 다시 붙는 중… 그동안 새 참가자는 들어올 수 없습니다', true); relink(); } });
     peer.on('connection', (conn) => {
       if (!S.conns.has(conn.peer)) { say('참가 요청을 받았습니다. 연결하는 중…'); setTimeout(() => { if (!S.ended && S.peer && !S.peer.disconnected) hostStatus(); }, 6000); }
       conn.on('data', (msg) => onHostData(conn, msg));
-      conn.on('close', () => { if (!S.conns.has(conn.peer)) return; S.conns.delete(conn.peer); S.calls.get(conn.peer)?.close(); S.calls.delete(conn.peer); removeMember(conn.peer); cast({ t: 'leave', id: conn.peer }); });
+      conn.on('close', () => { if (S.conns.get(conn.peer) === conn) dropGuest(conn.peer); });
     });
   });
 }
@@ -545,58 +556,106 @@ function relink() {
 setInterval(relink, 4000);
 addEventListener('online', relink);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') relink(); });
+// 서로 살아 있는지 2~3초마다 신호를 주고받는다. 창을 갑자기 닫거나 폰이 화면을 재우면 연결이 끊긴 줄 모르고 남는 일이 있어서다
+const seen = new Map(); let hbTick = performance.now();
+function dropGuest(id) {
+  const c = S.conns.get(id); if (!c) return;
+  S.conns.delete(id); seen.delete(id); try { c.close(); } catch (e) { /* 무시 */ }
+  S.calls.get(id)?.close(); S.calls.delete(id); removeMember(id); cast({ t: 'leave', id });
+}
+setInterval(() => {
+  if (S.role !== 'host' || !S.peer || S.ended) return;
+  const now = performance.now(), slept = now - hbTick > 6000; hbTick = now;
+  if (slept) { for (const id of S.conns.keys()) seen.set(id, now); return; } // 내 화면이 잠들었다 깬 직후에는 참가자를 내보내지 않는다
+  cast({ t: 'hb' });
+  for (const id of [...S.conns.keys()]) if (now - (seen.get(id) || now) > 15000) dropGuest(id);
+}, 2000);
 function onHostData(conn, msg) {
   if (!msg || typeof msg !== 'object') return;
   const id = conn.peer;
+  if (S.conns.get(id) === conn || msg.t === 'hello') seen.set(id, performance.now());
   if (msg.t === 'hello') {
     if (S.conns.size >= MAX_GUESTS) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 300); return; }
     const m = { id, name: String(msg.name || '참가자').slice(0, 12), avatar: AVATARS.some((a) => a.id === msg.avatar) ? msg.avatar : AVATARS[0].id, host: false };
+    // 같은 사람이 끊겼다 다시 붙은 경우: 자리는 그대로 두고 연결만 새것으로 바꾼다
+    const old = S.conns.get(id), back = members.has(id);
     S.conns.set(id, conn);
-    conn.send({ t: 'room', you: id, bg: S.bg, awayOn: S.awayOn, members: [...roster(), m] });
-    addMember(m, true);
-    cast({ t: 'join', m }, id);
+    if (old && old !== conn) { try { old.close(); } catch (e) { /* 무시 */ } }
+    S.calls.get(id)?.close(); S.calls.delete(id);
+    conn.send({ t: 'room', you: id, bg: S.bg, awayOn: S.awayOn, members: back ? roster() : [...roster(), m] });
+    if (!back) { addMember(m, true); cast({ t: 'join', m }, id); }
     if (S.mic) S.calls.set(id, S.peer.call(id, S.mic));
   } else if (!S.conns.has(id)) return;
   else if (msg.t === 'p' && Array.isArray(msg.k)) { const mem = members.get(id); if (mem) { applyPacket(mem, msg.k, false); mem.raw = msg.k; } }
   else if (msg.t === 'avatar' && AVATARS.some((a) => a.id === msg.avatar)) { setAvatar(id, msg.avatar); cast({ t: 'avatar', id, avatar: msg.avatar }); }
   else if (msg.t === 'away') { const v = !!msg.v && S.awayOn; setAway(id, v); cast({ t: 'away', id, v }, id); }
 }
+function clearMembers() {
+  for (const m of members.values()) { m.token++; m.inst?.dispose(); }
+  members.clear();
+  for (const g of ghosts.splice(0)) { g.token++; g.inst?.dispose(); }
+  layout();
+}
+// 참가: 진행자가 아직 없거나 응답이 없으면 포기하지 않고 계속 두드린다. 들어간 뒤에 진행자와 끊겨도 같은 방식으로 다시 붙는다
 function joinRoom(code) {
   return new Promise((resolve, reject) => {
-    const peer = new Peer({ config: ICE }); let done = false, tries = 0, conn = null, found = false, blockT = null, waits = 0, diag = '';
-    const fail = (m) => { if (done) return; done = true; clearTimeout(timer); clearTimeout(blockT); peer.destroy(); reject(new Error(m)); };
-    const BLOCKED = '수업은 찾았지만 기기끼리 연결이 막혔습니다. 진행자와 참가자가 서로 다른 통신망(예: LTE와 와이파이)일 때 생깁니다.' + (hasRelay ? ' 잠시 뒤 다시 시도해 주세요.' : ' 같은 와이파이에서는 됩니다. 다른 통신망끼리 쓰려면 중계 서버 설정이 필요합니다.');
-    const SILENT = '수업은 찾았지만 진행자 기기가 응답하지 않습니다. 진행자의 화면이 꺼졌거나 다른 앱·탭으로 넘어가 있으면 이렇게 됩니다. 진행자가 수업 화면을 켜 둔 상태에서 다시 시도해 주세요.';
-    const timer = setTimeout(() => fail((found ? BLOCKED : tries > 1 ? NOT_FOUND : '연결 서버에 닿지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.') + diag), 75000);
-    const NOT_FOUND = '수업을 찾지 못했습니다. 코드가 맞는지, 진행자의 수업 화면이 켜져 있는지 확인해 주세요. 진행자가 다른 앱이나 탭으로 넘어가 있으면 찾을 수 없습니다.';
+    const peer = new Peer({ config: ICE });
+    let joined = false, stopped = false, conn = null, attempt = 0, watch = null, rejoinAt = 0, lastHost = 0;
+    const t0 = performance.now();
+    S.peer = peer; S.code = code;
+    const alive = () => !stopped && !S.ended;
+    const tell = (text, bad) => { if (joined) say(text, bad); else { $('#lobbyNote').textContent = text; $('#enter').textContent = '기다리는 중… (누르면 취소)'; $('#enter').disabled = false; } };
+    S.cancelJoin = () => { if (joined || stopped) return; stopped = true; clearTimeout(watch); try { peer.destroy(); } catch (e) { /* 무시 */ } S.peer = null; S.cancelJoin = null; reject(new Error('참가를 취소했습니다.')); };
+    const giveUp = (m) => { if (!alive()) return; if (joined) endClass(m); else { stopped = true; clearTimeout(watch); try { peer.destroy(); } catch (e) { /* 무시 */ } S.peer = null; S.cancelJoin = null; reject(new Error(m)); } };
+    const again = (ms) => { clearTimeout(watch); watch = setTimeout(knock, ms); };
     const knock = () => {
-      if (done) return;
-      tries++;
-      if (tries > 1 && !found) $('#enter').textContent = `진행자를 찾는 중… (${tries})`;
-      conn = peer.connect(hostPeerId(code), { reliable: true });
-      // 3초 안에 '없는 수업' 응답이 없으면 수업은 있는 것. 그 뒤로도 연결이 안 열리면, 진행자가 응답을 했는지와 연결 경로 상태를 보고 원인을 가른다
-      const mine = conn; let relay = false; clearTimeout(blockT);
+      if (!alive()) return;
+      if (!joined && performance.now() - t0 > 20 * 60000) { giveUp('오래 기다렸지만 수업에 들어가지 못했습니다. 코드를 확인하고 다시 시도해 주세요.'); return; }
+      if (peer.destroyed) return;
+      if (peer.disconnected) { try { peer.reconnect(); } catch (e) { /* 무시 */ } again(2500); return; }
+      attempt++;
+      const mine = conn = peer.connect(hostPeerId(code), { reliable: true });
+      let relay = false;
+      if (!joined) setTimeout(() => { if (alive() && !joined && $('#enter').disabled) tell('수업에 연결하는 중입니다. 진행자 화면이 꺼져 있으면 켜질 때까지 기다립니다.'); }, 5000);
       try { mine.peerConnection?.addEventListener('icecandidate', (e) => { if (e.candidate && / typ relay /.test(e.candidate.candidate)) relay = true; }); } catch (e) { /* 진단용 */ }
-      blockT = setTimeout(() => {
-        if (done || conn !== mine) return;
-        found = true; $('#enter').textContent = '수업을 찾았습니다. 연결하는 중…';
-        blockT = setTimeout(() => {
-          if (done || conn !== mine || mine.open) return;
-          const pc = mine.peerConnection, answered = !!(pc && pc.remoteDescription), ice = pc ? pc.iceConnectionState : 'none';
-          diag = ` [진단 ${answered ? '응답O' : '응답X'}·${ice}·${relay ? '중계O' : '중계X'}·${waits + 1}회]`;
-          if (++waits < 4) { try { mine.close(); } catch (e) { /* 무시 */ } $('#enter').textContent = answered ? `연결 경로를 다시 찾는 중… (${waits + 1})` : `진행자 응답을 기다리는 중… (${waits + 1})`; knock(); }
-          else fail((answered ? BLOCKED : SILENT) + diag);
-        }, 11000);
-      }, 3000);
-      conn.on('open', () => { clearTimeout(blockT); conn.send({ t: 'hello', name: S.name, avatar: S.avatar }); });
-      conn.on('data', onData);
-      conn.on('close', () => { if (done && S.hostConn === conn) endClass('수업과의 연결이 끊겼습니다. 수업이 끝났거나 네트워크가 불안정할 수 있습니다.'); });
+      // 14초 안에 연결이 안 열리면: 진행자가 응답했는지 보고 안내한 뒤 다시 두드린다
+      clearTimeout(watch);
+      watch = setTimeout(() => {
+        if (!alive() || conn !== mine || mine.open) return;
+        const pc = mine.peerConnection, answered = !!(pc && pc.remoteDescription), ice = pc ? pc.iceConnectionState : 'none';
+        const diag = ` [진단 ${answered ? '응답O' : '응답X'}·${ice}·${relay ? '중계O' : '중계X'}·${attempt}회]`;
+        try { mine.close(); } catch (e) { /* 무시 */ }
+        tell((answered ? '기기 사이 연결 경로를 찾지 못해 다시 시도하는 중입니다.' : '수업은 찾았지만 진행자 기기가 응답하지 않습니다. 진행자가 수업 화면으로 돌아오면 자동으로 들어갑니다.') + diag, true);
+        knock();
+      }, 14000);
+      mine.on('open', () => { if (conn !== mine) return; clearTimeout(watch); mine.send({ t: 'hello', name: S.name, avatar: S.avatar }); again(15000); /* 인사에 답이 없으면 다시 */ });
+      mine.on('data', (msg) => { if (conn === mine) onData(msg, mine); });
+      mine.on('close', () => { if (!alive() || conn !== mine) return; if (joined) { if (S.hostConn === mine) lost(); } else again(2000); });
     };
-    const onData = (msg) => {
+    // 들어와 있다가 진행자와 끊겼을 때: 수업을 끝내지 않고, 진행자가 돌아오면 다시 붙는다
+    const lost = () => {
+      if (!S.hostConn) return;
+      S.hostConn = null;
+      $('#hostAudio').srcObject = null;
+      say('진행자와 연결이 끊겼습니다. 진행자가 돌아오면 자동으로 다시 연결됩니다', true);
+      again(1500);
+    };
+    const onData = (msg, from) => {
       if (!msg || typeof msg !== 'object') return;
-      if (msg.t === 'full') fail('수업 정원이 가득 찼습니다.');
-      else if (msg.t === 'room') { if (done) return; clearTimeout(timer); done = true; S.peer = peer; S.hostConn = conn; S.code = code; S.myId = peer.id; S.awayOn = msg.awayOn !== false; setBg(msg.bg); for (const m of msg.members || []) addMember(m, m.id === peer.id); resolve(); }
-      else if (msg.t === 'join') addMember(msg.m, true);
+      lastHost = performance.now();
+      if (msg.t === 'hb') return;
+      if (msg.t === 'full') giveUp('수업 정원이 가득 찼습니다.');
+      else if (msg.t === 'room') {
+        clearTimeout(watch);
+        const first = !joined;
+        S.hostConn = from; S.myId = peer.id; S.awayOn = msg.awayOn !== false; S.cancelJoin = null;
+        if (!first) clearMembers();
+        setBg(msg.bg);
+        for (const m of msg.members || []) addMember(m, first && m.id === peer.id);
+        if (first) { joined = true; resolve(); } else { rejoinAt = performance.now(); if (S.away) from.send({ t: 'away', v: true }); say('진행자와 다시 연결됐습니다'); }
+      }
+      else if (!joined || from !== S.hostConn) return;
+      else if (msg.t === 'join') addMember(msg.m, performance.now() - rejoinAt > 8000); // 다시 붙은 직후 한꺼번에 돌아오는 사람들은 걸어 들어오는 장면 없이 앉힌다
       else if (msg.t === 'leave') removeMember(msg.id);
       else if (msg.t === 'avatar') setAvatar(msg.id, msg.avatar);
       else if (msg.t === 'away') { if (msg.id !== S.myId) setAway(msg.id, !!msg.v); }
@@ -605,18 +664,24 @@ function joinRoom(code) {
       else if (msg.t === 'ps') { for (const pid in msg.a) { if (pid === S.myId) continue; const mem = members.get(pid); if (mem) applyPacket(mem, msg.a[pid], false); } }
       else if (msg.t === 'end') endClass('진행자가 수업을 마쳤습니다. 함께해 주셔서 고맙습니다.');
     };
+    const beat = setInterval(() => {
+      if (!alive()) { clearInterval(beat); return; }
+      const hc = S.hostConn; if (!joined || !hc) return;
+      if (hc.open) { try { hc.send({ t: 'hb' }); } catch (e) { /* 무시 */ } }
+      if (performance.now() - lastHost > 8000) { try { hc.close(); } catch (e) { /* 무시 */ } if (S.hostConn === hc) lost(); } // 진행자 신호가 8초 넘게 없으면 끊긴 것으로 본다
+    }, 2500);
     peer.on('error', (err) => {
-      if (done) { if (!S.ended && (err.type === 'network' || err.type === 'disconnected')) say('연결 서버에 다시 붙는 중… 수업은 계속됩니다'); return; }
-      if (err.type === 'peer-unavailable') { clearTimeout(blockT); if (tries < 9) setTimeout(knock, 2500); else fail(NOT_FOUND); return; } // 진행자가 잠깐 끊겼을 수 있으니 몇 번 더 두드린다
-      if (err.type === 'network' || err.type === 'disconnected' || err.type === 'socket-closed') return; // 아래 disconnected에서 다시 붙는다
-      fail('연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.');
+      if (!alive()) return;
+      if (err.type === 'peer-unavailable') { // 진행자가 지금 연결 서버에 없다: 잠시 뒤 다시
+        tell(joined ? '진행자를 기다리는 중입니다. 진행자가 돌아오면 자동으로 다시 연결됩니다' : attempt >= 3 ? '아직 수업을 찾지 못했습니다. 코드가 맞다면, 진행자가 수업 화면을 켜는 대로 자동으로 들어갑니다.' : '수업을 찾는 중…', joined);
+        again(3000); return;
+      }
+      if (['network', 'disconnected', 'socket-closed', 'socket-error', 'server-error'].includes(err.type)) { tell('연결 서버에 다시 붙는 중…', joined); again(3000); return; }
+      if (!joined) giveUp(`연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요. (${err.type})`);
     });
-    peer.on('disconnected', () => { if (!S.ended && !peer.destroyed) { try { peer.reconnect(); } catch (e) { /* 무시 */ } } });
+    peer.on('disconnected', () => { if (alive() && !peer.destroyed) { try { peer.reconnect(); } catch (e) { /* 무시 */ } } });
     peer.on('call', (call) => { call.answer(); call.on('stream', playHost); });
-    peer.on('open', () => {
-      if (done) { say($('#hostAudio').srcObject ? '진행자 목소리 연결됨' : '진행자 목소리를 기다리는 중…'); return; }
-      if (!tries) knock();
-    });
+    peer.on('open', () => { if (!attempt) knock(); });
   });
 }
 function playHost(stream) {
@@ -678,7 +743,7 @@ function openSheet(kind) {
   } else {
     sh.append(el('h2', null, '배경 (모두에게 바뀝니다)'));
     const row = el('div', 'row');
-    for (const g of BGS) { const b = el('button', 'thumb'); b.type = 'button'; b.setAttribute('aria-label', g.label); b.setAttribute('aria-pressed', String(g.id === S.bg)); b.style.backgroundImage = `url(${bgUrl(g.id, true)})`; b.addEventListener('click', () => { setBg(g.id); cast({ t: 'bg', bg: g.id }); openSheet('host'); }); row.append(b); }
+    for (const g of BGS) { const b = el('button', 'thumb'); b.type = 'button'; b.setAttribute('aria-label', g.label); b.setAttribute('aria-pressed', String(g.id === S.bg)); b.style.backgroundImage = `url(${bgUrl(g.id, true)})`; b.addEventListener('click', () => { setBg(g.id); cast({ t: 'bg', bg: g.id }); saveHost(); openSheet('host'); }); row.append(b); }
     sh.append(row, el('h2', null, '소리'));
     const row2 = el('div', 'row'), bowl = el('button', 'chip', '싱잉볼 모드 (잡음 제거 끔)'); bowl.type = 'button'; bowl.setAttribute('aria-pressed', String(S.bowl));
     bowl.addEventListener('click', async () => { S.bowl = !S.bowl; await startMic(); openSheet('host'); });
@@ -692,7 +757,7 @@ function openSheet(kind) {
 }
 // 진행자 스위치: 끄면 자리를 비웠던 사람이 모두 돌아와 앉고, 이후로는 얼굴이 안 보여도 그대로 앉아 있는다 (누워서 하는 수련 등)
 function setAwayOn(v) {
-  S.awayOn = v; cast({ t: 'cfg', awayOn: v });
+  S.awayOn = v; cast({ t: 'cfg', awayOn: v }); saveHost();
   if (!v) for (const m of members.values()) if (m.away) { setAway(m.id, false); cast({ t: 'away', id: m.id, v: false }); }
   say(v ? '자리 비움 표시 켬' : '자리 비움 표시 끔 · 모두 앉은 채로 표시됩니다');
 }
@@ -728,7 +793,7 @@ async function invite() {
   try { await navigator.clipboard.writeText(`${text}\n${inviteUrl()}`); say('초대 링크를 복사했습니다'); } catch (e) { say(inviteUrl()); }
 }
 function leave() {
-  if (S.role === 'host') { cast({ t: 'end' }); setTimeout(() => endClass('수업을 마쳤습니다.'), 250); } else endClass('수업에서 나왔습니다.');
+  if (S.role === 'host') { forgetHost(); cast({ t: 'end' }); setTimeout(() => endClass('수업을 마쳤습니다.'), 250); } else endClass('수업에서 나왔습니다.');
 }
 function endClass(msg) {
   if (S.ended) return; S.ended = true;
@@ -750,14 +815,18 @@ function setMode(m) {
   mode = m;
   $('#tabJoin').setAttribute('aria-selected', String(m === 'join')); $('#tabHost').setAttribute('aria-selected', String(m === 'host'));
   $('#codeWrap').hidden = m === 'host';
-  $('#enter').textContent = m === 'host' ? '수업 열기' : '참가하기';
+  const sv = m === 'host' ? savedHost() : null;
+  $('#enter').textContent = m === 'host' ? (sv ? `수업 이어가기 (코드 ${sv.code})` : '수업 열기') : '참가하기';
+  $('#fresh').hidden = !sv;
   $('#lobbyNote').textContent = m === 'host' ? '수업을 열면 마이크와 카메라 사용을 묻습니다. 마이크는 진행 목소리를 보내는 데, 카메라는 아바타를 움직이는 데만 씁니다.' : '입장할 때 카메라 사용을 묻습니다. 허용하지 않아도 참가할 수 있고, 그 경우 아바타는 가만히 앉아 있습니다.';
   $('#lobbyErr').hidden = true;
 }
 $('#tabJoin').addEventListener('click', () => setMode('join'));
 $('#tabHost').addEventListener('click', () => setMode('host'));
+$('#fresh').addEventListener('click', () => { forgetHost(); setMode('host'); });
 const lobbyErr = (t) => { const e = $('#lobbyErr'); e.textContent = t; e.hidden = false; };
 $('#enter').addEventListener('click', async () => {
+  if (S.cancelJoin) { S.cancelJoin(); return; } // 기다리는 중에 다시 누르면 취소
   const btn = $('#enter'), name = $('#name').value.trim(), code = $('#code').value.trim().toUpperCase();
   $('#lobbyErr').hidden = true;
   if (!name) { lobbyErr('이름을 입력해 주세요.'); $('#name').focus(); return; }
@@ -768,10 +837,15 @@ $('#enter').addEventListener('click', async () => {
   try { localStorage.setItem('medclass-name', S.name); } catch (e) { /* 무시 */ }
   await getIce();
   try {
-    if (mode === 'host') { await openHost(); addMember({ id: S.myId, name: S.name, avatar: S.avatar, host: true }, true); await startMic(); }
+    if (mode === 'host') {
+      const sv = savedHost();
+      if (sv) { S.bg = BGS.some((g) => g.id === sv.bg) ? sv.bg : S.bg; S.awayOn = sv.awayOn !== false; }
+      await openHost(sv ? sv.code : null); saveHost();
+      addMember({ id: S.myId, name: S.name, avatar: S.avatar, host: true }, true); await startMic();
+    }
     else await joinRoom(code);
   } catch (err) {
-    console.error(err); btn.disabled = false; setMode(mode);
+    console.error(err); btn.disabled = false; S.role = null; setMode(mode);
     lobbyErr(err.message && /[가-힣]/.test(err.message) ? err.message : '수업에 연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.');
     return;
   }
@@ -784,7 +858,7 @@ $('#enter').addEventListener('click', async () => {
   await startCamera(); toBar();
   if (S.role === 'join' && !S.camOn) say('카메라 없이 참가 중 · 아바타는 가만히 앉아 있습니다');
 });
-addEventListener('pagehide', () => { if (S.role === 'host' && !S.ended) cast({ t: 'end' }); });
+// 진행자가 창을 닫거나 다른 앱으로 가도 수업을 끝내지 않는다. 끝내는 건 '수업 종료' 버튼뿐이다
 
 /* ---------- 루프 ---------- */
 function resize() {
@@ -846,6 +920,7 @@ const lobbyPick = (id) => { pickAvatar(id); avatarRow($('#lobbyAv'), lobbyPick);
 avatarRow($('#lobbyAv'), lobbyPick);
 const preset = new URLSearchParams(location.search).get('room');
 if (preset && /^[A-Za-z0-9]{6}$/.test(preset)) $('#code').value = preset.toUpperCase();
+else if (savedHost()) setMode('host'); // 진행하던 수업이 있으면 바로 이어갈 수 있게
 setBg(S.bg); resize(); tick();
 </script>
 </body>
