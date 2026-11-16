@@ -119,16 +119,21 @@ import * as THREE from 'three';
 
 const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
 const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-// neck: 목 위치, split: 눈과 입 사이 높이 (둘 다 이미지 위에서부터의 비율). hx·hw: 머리 가운데와 반폭(그림 높이를 1로 본 단위). side: 손을 드는 쪽(-1 화면 왼쪽). ex·ey: 든 팔의 팔꿈치 위치(그림 가운데 기준)
+// neck: 목 위치, split: 눈과 입 사이 높이 (둘 다 이미지 위에서부터의 비율). hx·hw: 머리 가운데와 반폭(그림 높이를 1로 본 단위). al·ar: 화면 왼쪽·오른쪽 팔을 들었을 때의 팔꿈치 위치(그림 가운데 기준). sh: 선 키
 const AVATARS = [
-  { id: 'track', label: '트레이닝복', neck: 0.260, split: 0.18, hx: -0.005, hw: 0.092, side: -1, ex: -0.244, ey: 0.035 },
-  { id: 'home', label: '홈웨어', neck: 0.299, split: 0.206, hx: -0.003, hw: 0.134, side: -1, ex: -0.256, ey: 0.005 },
-  { id: 'yoga', label: '요가복', neck: 0.283, split: 0.195, hx: -0.011, hw: 0.136, side: -1, ex: -0.236, ey: 0.019 },
-  { id: 'hanbok', label: '생활한복', neck: 0.266, split: 0.184, hx: -0.002, hw: 0.089, side: -1, ex: -0.288, ey: 0.023 },
-  { id: 'knit', label: '니트', neck: 0.285, split: 0.196, hx: -0.0, hw: 0.128, side: -1, ex: -0.253, ey: 0.032 },
-  { id: 'hoodie', label: '후드티', neck: 0.262, split: 0.181, hx: -0.004, hw: 0.11, side: -1, ex: -0.258, ey: 0.036 },
-  { id: 'bear', label: '곰', neck: 0.318, split: 0.22, hx: 0.0, hw: 0.197, side: -1, ex: -0.234, ey: 0.091 },
-  { id: 'cat', label: '고양이', neck: 0.366, split: 0.252, hx: 0.007, hw: 0.208, side: -1, ex: -0.203, ey: 0.063 },
+  { id: 'track', label: '트레이닝복', neck: 0.26, split: 0.18, hx: -0.005, hw: 0.092, al: [-0.229, 0.037], ar: [0.223, 0.038], sh: 1.61 },
+  { id: 'home', label: '홈웨어', neck: 0.299, split: 0.206, hx: -0.003, hw: 0.134, al: [-0.238, 0.002], ar: [0.228, -0.003], sh: 1.64 },
+  { id: 'bob', label: '단발머리', neck: 0.266, split: 0.184, hx: -0.001, hw: 0.114, al: [-0.217, 0.028], ar: [0.213, 0.028], sh: 1.60 },
+  { id: 'man', label: '트레이닝복 남성', neck: 0.295, split: 0.18, hx: 0.001, hw: 0.118, al: [-0.238, 0.027], ar: [0.238, 0.024], sh: 1.85 },
+  { id: 'kid', label: '어린이', neck: 0.313, split: 0.217, hx: -0.003, hw: 0.142, al: [-0.213, 0.037], ar: [0.213, 0.036], sh: 1.50 },
+  { id: 'yoga', label: '요가복', neck: 0.283, split: 0.195, hx: -0.011, hw: 0.136, al: [-0.253, 0.05], ar: [0.245, 0.049], sh: 1.61 },
+  { id: 'hanbok', label: '생활한복', neck: 0.266, split: 0.184, hx: -0.002, hw: 0.089, al: [-0.272, -0.004], ar: [0.268, 0.003], sh: 1.57 },
+  { id: 'knit', label: '니트', neck: 0.285, split: 0.196, hx: -0.0, hw: 0.128, al: [-0.227, 0.012], ar: [0.221, 0.01], sh: 1.50 },
+  { id: 'hoodie', label: '후드티', neck: 0.262, split: 0.181, hx: -0.004, hw: 0.11, al: [-0.259, 0.059], ar: [0.254, 0.054], sh: 1.50 },
+  { id: 'bear', label: '곰', neck: 0.318, split: 0.22, hx: 0.0, hw: 0.197, al: [-0.242, 0.053], ar: [0.238, 0.052], sh: 1.08 },
+  { id: 'cat', label: '고양이', neck: 0.366, split: 0.252, hx: 0.007, hw: 0.208, al: [-0.216, 0.014], ar: [0.216, 0.017], sh: 1.09 },
+  { id: 'dog', label: '강아지', neck: 0.389, split: 0.267, hx: 0.001, hw: 0.272, al: [-0.262, 0.063], ar: [0.264, 0.065], sh: 1.08 },
+  { id: 'penguin', label: '펭귄', neck: 0.339, split: 0.234, hx: -0.001, hw: 0.188, al: [-0.204, 0.117], ar: [0.203, 0.116], sh: 1.08 },
 ];
 // floor: 배경 그림에서 바닥이 시작되는 높이(위에서부터의 비율)
 const BGS = [
@@ -139,8 +144,8 @@ const bgUrl = (id, thumb) => `bg/${thumb ? 'thumb-' : ''}${id}.jpg`;
 const KEYS = ['eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen', 'mouthFunnel', 'mouthPucker', 'mouthSmileLeft', 'mouthSmileRight'];
 const MAX_GUESTS = 12, SEND_MS = 85, PREFIX = 'sunmedclass-';
 const HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
-const GEST = [null, 'pray', 'up', 'up']; // 손동작 번호: 1 합장, 2 손 들기 (3은 예전 버전의 손 흔들기, 2와 같게 처리)
-const AWAY_MS = 6000, WALK_S = 2.4, SIT_S = 0.8, STAND_H = 1.72;
+const GEST = [null, 'pray', 'both', 'both']; // 손동작 번호: 1 합장, 2 손 들기(한 손 또는 양손. 그림은 양손 든 그림 하나를 좌우로 나눠 쓴다)
+const AWAY_MS = 6000, TURN_S = 0.3, SIT_S = 0.8, STAND_H = 1.72;
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp;
@@ -198,7 +203,7 @@ void main() {
 // 얼굴(머리 폭 안쪽, 목 위)은 눈 뜬·감은·말하는 그림을 섞고, 그 밖의 몸은 기본 그림과 손동작 그림을 섞는다
 const FRAG = `
 uniform sampler2D tOpen; uniform sampler2D tClosed; uniform sampler2D tTalk; uniform sampler2D tPose;
-uniform float uBlink; uniform float uTalk; uniform float uPose; uniform float uAlpha;
+uniform float uBlink; uniform float uTalk; uniform vec2 uPose; uniform float uAlpha;
 uniform float uNeck; uniform float uSplit; uniform vec2 uHead;
 varying vec2 vUv; varying vec2 vL;
 void main() {
@@ -206,7 +211,7 @@ void main() {
   vec4 eyes = mix(o, texture2D(tClosed, vUv), uBlink);
   vec4 mouth = mix(o, texture2D(tTalk, vUv), uTalk);
   vec4 head = mix(mouth, eyes, smoothstep(uSplit - 0.012, uSplit + 0.012, vL.y));
-  vec4 body = mix(o, texture2D(tPose, vUv), uPose);
+  vec4 body = mix(o, texture2D(tPose, vUv), mix(uPose.x, uPose.y, smoothstep(-0.03, 0.03, vL.x - uHead.x))); // 화면 왼쪽 팔과 오른쪽 팔을 따로 든다
   float hm = smoothstep(uNeck - 0.004, uNeck + 0.028, vL.y) * (1.0 - smoothstep(uHead.y, uHead.y * 1.16, abs(vL.x - uHead.x)));
   gl_FragColor = mix(body, head, hm);
   gl_FragColor.a *= uAlpha;
@@ -214,66 +219,83 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
-// 앉은 그림(고개·몸 움직임, 눈 뜬/감은 그림 혼합) + 서 있는 그림(걸어 들어오고 나갈 때)
+// 앉은 그림(고개·몸 움직임, 눈·입 섞기, 좌우 팔 따로 들기) + 서 있는 그림 + 걷는 옆모습 두 장
 async function makeAvatar(defId) {
   const def = AVATARS.find((a) => a.id === defId) || AVATARS[0];
-  const [tOpen, tClosed, tStand, tTalk] = await Promise.all([
-    loadTex(`avatars/${def.id}-open.webp`), loadTex(`avatars/${def.id}-closed.webp`),
-    loadTex(`avatars/${def.id}-stand.webp`).catch(() => null), loadTex(`avatars/${def.id}-talk.webp`).catch(() => null),
+  const opt = (name) => loadTex(`avatars/${def.id}-${name}.webp`).catch(() => null);
+  const [tOpen, tClosed, tStand, tTalk, tW1, tW2, tW3] = await Promise.all([
+    loadTex(`avatars/${def.id}-open.webp`), loadTex(`avatars/${def.id}-closed.webp`), opt('stand'), opt('talk'), opt('walk1'), opt('walk2'), opt('walk3'),
   ]);
   const W = tOpen.image.width / tOpen.image.height;
   const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthTest: false,
-    uniforms: { tOpen: { value: tOpen }, tClosed: { value: tClosed }, tTalk: { value: tTalk || tOpen }, tPose: { value: tOpen }, uBlink: { value: 0 }, uTalk: { value: 0 }, uPose: { value: 0 }, uAlpha: { value: 1 }, uRot: { value: new THREE.Vector3() }, uLean: { value: new THREE.Vector2() }, uNeck: { value: 0.5 - def.neck }, uSplit: { value: 0.5 - def.split }, uHead: { value: new THREE.Vector2(def.hx, def.hw) }, uBreath: { value: 0 }, uW: { value: W } } });
-  let poseName = null, poseK = 0, poseBusy = false, armA = 1.55, armV = 0;
-  // 든 팔의 팔뚝과 손은 따로 떼어 팔꿈치를 축으로 돌린다 (손 위치를 따라 움직이게)
-  const armMat = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, opacity: 0 });
-  const armMesh = new THREE.Mesh(new THREE.PlaneGeometry(W, 1), armMat);
-  armMesh.position.set(-def.ex, -def.ey, 0);
-  const arm = new THREE.Group(); arm.add(armMesh); arm.visible = false;
+    uniforms: { tOpen: { value: tOpen }, tClosed: { value: tClosed }, tTalk: { value: tTalk || tOpen }, tPose: { value: tOpen }, uBlink: { value: 0 }, uTalk: { value: 0 }, uPose: { value: new THREE.Vector2() }, uAlpha: { value: 1 }, uRot: { value: new THREE.Vector3() }, uLean: { value: new THREE.Vector2() }, uNeck: { value: 0.5 - def.neck }, uSplit: { value: 0.5 - def.split }, uHead: { value: new THREE.Vector2(def.hx, def.hw) }, uBreath: { value: 0 }, uW: { value: W } } });
   const body = new THREE.Mesh(new THREE.PlaneGeometry(W, 1, 24, 48), mat);
   body.position.y = 0.5;
   const shMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthTest: false });
   const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shMat);
   sh.position.y = 0.035; sh.scale.set(W * 1.15, 0.13, 1);
-  let stand = null, stMat = null;
-  if (tStand) {
-    stMat = new THREE.MeshBasicMaterial({ map: tStand, transparent: true, depthTest: false });
-    stand = new THREE.Mesh(new THREE.PlaneGeometry(STAND_H * tStand.image.width / tStand.image.height, STAND_H), stMat);
-    stand.visible = false;
-  }
-  const root = new THREE.Group(); root.add(sh, body, arm); if (stand) root.add(stand);
+  const root = new THREE.Group(); root.add(sh, body);
+  // 든 팔의 팔뚝과 손은 따로 떼어 팔꿈치를 축으로 돌린다. 화면 왼쪽 팔(side -1)과 오른쪽 팔(side +1)
+  const arms = [-1, 1].map((side) => {
+    const el = side < 0 ? def.al : def.ar; if (!el) return null;
+    const m = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, opacity: 0 });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(W, 1), m);
+    mesh.position.set(-el[0], -el[1], 0);
+    const g = new THREE.Group(); g.add(mesh); g.visible = false; root.add(g);
+    return { side, el, m, mesh, g, k: 0, a: 1.55, v: 0, goal: 0 };
+  });
+  // 서 있는 그림과 걷는 그림은 발바닥이 바닥(y=0)에 닿게 놓는다
+  const SH = def.sh || STAND_H; // 앉은 키를 1로 봤을 때 선 키 (머리 크기가 앉은 그림과 같아지게 맞춘 값)
+  const flat = (tx) => { if (!tx) return null; const m = new THREE.MeshBasicMaterial({ map: tx, transparent: true, depthTest: false }); const mesh = new THREE.Mesh(new THREE.PlaneGeometry(SH * tx.image.width / tx.image.height, SH), m); mesh.visible = false; root.add(mesh); return { m, mesh }; };
+  const stand = flat(tStand), walks = tW1 && tW2 ? [flat(tW1), flat(tW2), flat(tW3)] : null;
+  // 걸음 순서: 한 발 내딛기 → 다리 모으기 → 반대 발 내딛기 → 다리 모으기 (모으는 그림이 없으면 내딛는 두 장만 번갈아)
+  const cycle = walks && walks[2] ? [0, 2, 1, 2] : [0, 1];
   root.visible = false;
+  let poseName = null, poseBusy = false, kPray = 0;
   return {
-    defId: def.id, root,
-    // seat: 앉은 그림의 불투명도(0~1), up: 서 있는 그림의 불투명도, squat: 앉는 중 정도(0 선 자세 ~ 1 다 앉음), step: 걸음 위상
-    draw(p, t, dt, order, seat, up, squat, step) {
+    defId: def.id, root, canWalk: !!walks,
+    // seat: 앉은 그림 불투명도, up: 서 있는 그림, walk: 걷는 그림, squat: 앉는 정도(0 선 자세 ~ 1 다 앉음), step: 걸음 위상(π마다 한 걸음), dir: 걷는 방향(+1 오른쪽)
+    draw(p, t, dt, order, seat, up, squat, walk, step, dir) {
       const u = mat.uniforms;
-      // 손동작: 다른 동작으로 바뀔 때는 먼저 기본 자세로 돌아갔다가 넘어간다
-      const want = GEST[p.g] || null;
+      // 손동작: 합장과 손 들기는 그림이 달라서, 바뀔 때는 먼저 기본 자세로 돌아갔다가 넘어간다
+      const want = GEST[p.g] || null, hands = [p.hl, p.hr];
+      const anyK = kPray > 0.01 || arms.some((x) => x && x.k > 0.01);
+      let tPray = 0; const tArm = [0, 0];
       if (want && want !== poseName) {
-        if (poseK > 0.01) poseK -= dt * 3.2;
-        else if (!poseBusy) {
+        if (!anyK && !poseBusy) {
           poseBusy = true;
-          const files = want === 'up' ? [`avatars/${def.id}-upb.webp`, `avatars/${def.id}-arm.webp`] : [`avatars/${def.id}-${want}.webp`];
-          Promise.all(files.map(loadTex)).then(([tb, ta]) => { u.tPose.value = tb; if (ta) { armMat.map = ta; armMat.needsUpdate = true; } poseName = want; }).catch(() => {}).finally(() => { poseBusy = false; });
+          const files = want === 'both' ? ['bothb', 'arml', 'armr'] : ['pray'];
+          Promise.all(files.map((f) => loadTex(`avatars/${def.id}-${f}.webp`))).then(([tb, tl, tr]) => {
+            u.tPose.value = tb; [tl, tr].forEach((tx, i) => { if (tx && arms[i]) { arms[i].m.map = tx; arms[i].m.needsUpdate = true; } }); poseName = want;
+          }).catch(() => {}).finally(() => { poseBusy = false; });
         }
-      } else poseK += (want ? 1 : -1) * dt * 3.2;
-      poseK = clamp(poseK, 0, 1);
-      const isUp = poseName === 'up' && poseK > 0.001;
-      u.uPose.value = isUp ? clamp(poseK / 0.45, 0, 1) : ease(poseK);
-      // 팔뚝: 옆으로 내린 각도(1.55)에서 올라와 손 위치(p.ha)를 따라간다. 약한 스프링으로 살짝 출렁이게 한다
-      const goal = isUp ? lerp(1.55, p.ha, ease(poseK)) : 1.55;
-      for (let left = dt; left > 0; left -= 1 / 120) { const h = Math.min(left, 1 / 120); armV += ((goal - armA) * 130 - armV * 15) * h; armA += armV * h; } // 화면이 느려도 출렁임이 튀지 않게 잘게 나눠 계산
-      if (!isUp) { armA = 1.55; armV = 0; }
-      arm.visible = isUp && seat > 0.01 && !!armMat.map;
-      if (arm.visible) {
-        const wl = THREE.MathUtils.smoothstep(def.ey, -0.36, 0.12), la = -p.lean.x * 0.24 * wl;
-        const rx = def.ex, ry = (def.ey + 0.27) * (1 - 0.07 * p.lean.y * wl), cl = Math.cos(la), sl = Math.sin(la);
-        arm.position.set(cl * rx - sl * ry, body.position.y + sl * rx + cl * ry - 0.27, 0); // 상체가 기울면 팔꿈치도 같이 따라간다
-        arm.rotation.z = -def.side * armA + la;
-        armMat.opacity = clamp(poseK / 0.25, 0, 1) * seat;
-        armMesh.renderOrder = order + 2;
-      }
+      } else if (want === 'pray') tPray = 1;
+      else if (want === 'both') { tArm[0] = hands[0] != null ? 1 : 0; tArm[1] = hands[1] != null ? 1 : 0; }
+      const ramp = (k, to) => clamp(k + Math.sign(to - k) * dt * 3.2, Math.min(k, to), Math.max(k, to));
+      kPray = ramp(kPray, tPray);
+      const pw = [0, 0];
+      arms.forEach((x, i) => {
+        if (!x) return;
+        x.k = ramp(x.k, tArm[i]);
+        if (hands[i] != null) x.goal = hands[i];
+        const on = poseName === 'both' && x.k > 0.001;
+        pw[i] = on ? clamp(x.k / 0.45, 0, 1) : 0;
+        // 팔뚝: 옆으로 내린 각도(1.55)에서 올라와 손 위치를 따라간다. 약한 스프링으로 살짝 출렁이게 한다
+        const goal = on ? lerp(1.55, x.goal, ease(x.k)) : 1.55;
+        for (let left = dt; left > 0; left -= 1 / 120) { const h = Math.min(left, 1 / 120); x.v += ((goal - x.a) * 130 - x.v * 15) * h; x.a += x.v * h; } // 화면이 느려도 튀지 않게 잘게 나눠 계산
+        if (!on) { x.a = 1.55; x.v = 0; }
+        x.g.visible = on && seat > 0.01 && !!x.m.map;
+        if (x.g.visible) {
+          const wl = THREE.MathUtils.smoothstep(x.el[1], -0.36, 0.12), la = -p.lean.x * 0.24 * wl;
+          const rx = x.el[0], ry = (x.el[1] + 0.27) * (1 - 0.07 * p.lean.y * wl), cl = Math.cos(la), sl = Math.sin(la);
+          x.g.position.set(cl * rx - sl * ry, body.position.y + sl * rx + cl * ry - 0.27, 0); // 상체가 기울면 팔꿈치도 같이 따라간다
+          x.g.rotation.z = -x.side * x.a + la;
+          x.m.opacity = clamp(x.k / 0.25, 0, 1) * seat;
+          x.mesh.renderOrder = order + 2;
+        }
+      });
+      if (poseName === 'pray') pw[0] = pw[1] = ease(kPray);
+      u.uPose.value.set(pw[0], pw[1]);
       u.uTalk.value = tTalk ? p.talk : 0;
       u.uRot.value.set(p.euler.x, p.euler.y, p.euler.z);
       u.uLean.value.set(p.lean.x, p.lean.y);
@@ -281,17 +303,30 @@ async function makeAvatar(defId) {
       u.uBlink.value = clamp((Math.max(p.blend.eyeBlinkLeft || 0, p.blend.eyeBlinkRight || 0) - 0.25) / 0.35, 0, 1);
       u.uAlpha.value = seat; body.visible = seat > 0.01;
       body.position.y = 0.5 + (1 - squat) * 0.16;
-      shMat.opacity = Math.max(seat, up); sh.visible = shMat.opacity > 0.01;
+      shMat.opacity = Math.max(seat, up, walk); sh.visible = shMat.opacity > 0.01;
       sh.renderOrder = order; body.renderOrder = order + 1;
       if (stand) {
-        stand.visible = up > 0.01; stMat.opacity = up; stand.renderOrder = order + 1;
+        stand.mesh.visible = up > 0.01; stand.m.opacity = up; stand.mesh.renderOrder = order + 1;
         const sy = 1 - 0.36 * squat;
-        stand.scale.set(1 + 0.05 * squat, sy, 1);
-        stand.position.y = (STAND_H * sy) / 2 + Math.abs(Math.sin(step)) * 0.03;
-        stand.rotation.z = Math.sin(step) * 0.035;
+        stand.mesh.scale.set(1 + 0.05 * squat, sy, 1);
+        stand.mesh.position.y = (SH * sy) / 2;
+      }
+      if (walks) {
+        // 걸음에 맞춰 그림을 바꾸고, 다리가 모일 때 몸이 살짝 올라간다
+        const per = cycle.length === 4 ? Math.PI / 2 : Math.PI;
+        const f = cycle[Math.floor((step + per / 2) / per) % cycle.length], bob = Math.abs(Math.sin(step)) * 0.022;
+        walks.forEach((wk, i) => {
+          if (!wk) return;
+          wk.mesh.visible = walk > 0.01 && i === f; wk.m.opacity = walk; wk.mesh.renderOrder = order + 1;
+          wk.mesh.scale.x = dir; wk.mesh.position.y = SH / 2 + bob;
+        });
       }
     },
-    dispose() { scene.remove(root); armMesh.geometry.dispose(); armMat.dispose(); body.geometry.dispose(); mat.dispose(); sh.geometry.dispose(); shMat.dispose(); if (stand) { stand.geometry.dispose(); stMat.dispose(); } },
+    dispose() {
+      scene.remove(root); body.geometry.dispose(); mat.dispose(); sh.geometry.dispose(); shMat.dispose();
+      for (const x of arms) if (x) { x.mesh.geometry.dispose(); x.m.dispose(); }
+      for (const f of [stand, ...(walks || [])]) if (f) { f.mesh.geometry.dispose(); f.m.dispose(); }
+    },
   };
 }
 
@@ -303,11 +338,11 @@ const ghosts = [];         // 나간 뒤 걸어 나가는 중인 사람
 const statusEl = $('#status');
 const say = (t, bad) => { statusEl.textContent = t; statusEl.classList.toggle('bad', !!bad); };
 
-function newPose() { return { blend: {}, quat: new THREE.Quaternion(), euler: new THREE.Euler(), lean: new THREE.Vector2(), talk: 0, g: 0, ha: 0, phase: Math.random() * 6 }; }
+function newPose() { return { blend: {}, quat: new THREE.Quaternion(), euler: new THREE.Euler(), lean: new THREE.Vector2(), talk: 0, g: 0, hl: null, hr: null, phase: Math.random() * 6 }; }
 // walkIn: 걸어 들어와 앉는 장면을 보여줄지 (이미 앉아 있던 사람은 false)
 function addMember(m, walkIn) {
   if (members.has(m.id)) return members.get(m.id);
-  const mem = { id: m.id, name: m.name, avatar: m.avatar, host: !!m.host, away: !!m.away, slot: null, inst: null, token: 0, st: m.away ? 'gone' : walkIn ? 'wait' : 'seated', t0: 0, seat: null, cur: null, pose: newPose(), target: { blend: {}, quat: new THREE.Quaternion(), lean: new THREE.Vector2(), g: 0, ha: 0 }, lastSeen: 0 };
+  const mem = { id: m.id, name: m.name, avatar: m.avatar, host: !!m.host, away: !!m.away, slot: null, inst: null, token: 0, st: m.away ? 'gone' : walkIn ? 'wait' : 'seated', t0: 0, seat: null, cur: null, pose: newPose(), target: { blend: {}, quat: new THREE.Quaternion(), lean: new THREE.Vector2(), g: 0, hl: null, hr: null }, lastSeen: 0 };
   members.set(mem.id, mem);
   loadInst(mem);
   layout();
@@ -407,8 +442,10 @@ function place() {
 }
 
 /* ---------- 표정·몸 데이터 ---------- */
-// 패킷: [[고개 x,y,z], [표정 0~100 ...], [몸 기울기 x,y (-100~100)], 손동작 번호, 든 손의 각도(바깥쪽 +, 100배)]
-const enc = (blend, e, lean, g, ha) => [[+e.x.toFixed(3), +e.y.toFixed(3), +e.z.toFixed(3)], KEYS.map((k) => Math.round((blend[k] || 0) * 100)), [Math.round(lean.x * 100), Math.round(lean.y * 100)], g | 0, Math.round((ha || 0) * 100)];
+// 패킷: [[고개 x,y,z], [표정 0~100 ...], [몸 기울기 x,y (-100~100)], 손동작 번호, [화면 왼쪽 손 각도, 오른쪽 손 각도] (바깥쪽 +, 100배. 안 든 손은 999)]
+const encA = (v) => (v == null ? 999 : Math.round(v * 100));
+const decA = (v) => (typeof v === 'number' && v !== 999 ? clamp(v / 100, -0.6, 1.3) : null);
+const enc = (blend, e, lean, g, hl, hr) => [[+e.x.toFixed(3), +e.y.toFixed(3), +e.z.toFixed(3)], KEYS.map((k) => Math.round((blend[k] || 0) * 100)), [Math.round(lean.x * 100), Math.round(lean.y * 100)], g | 0, [encA(hl), encA(hr)]];
 function applyPacket(mem, pk, mirror) {
   const [e, b, l] = pk, blend = {};
   KEYS.forEach((k, i) => { blend[k] = (b[i] || 0) / 100; });
@@ -418,13 +455,16 @@ function applyPacket(mem, pk, mirror) {
     mem.target.quat.setFromEuler(new THREE.Euler(e[0], -e[1], -e[2]));
     mem.target.lean.set(-lx, ly);
   } else { mem.target.quat.setFromEuler(new THREE.Euler(e[0], e[1], e[2])); mem.target.lean.set(lx, ly); }
-  mem.target.blend = blend; mem.target.g = pk[3] >= 1 && pk[3] <= 3 ? pk[3] | 0 : 0; mem.target.ha = clamp((pk[4] || 0) / 100, -0.6, 1.3); mem.lastSeen = performance.now();
+  mem.target.blend = blend; mem.target.g = pk[3] >= 1 && pk[3] <= 3 ? pk[3] | 0 : 0;
+  const hs = Array.isArray(pk[4]) ? [decA(pk[4][0]), decA(pk[4][1])] : [decA(pk[4] ?? 999), null]; // 예전 형식(숫자 하나)도 받는다
+  mem.target.hl = mirror ? hs[1] : hs[0]; mem.target.hr = mirror ? hs[0] : hs[1]; // 내 화면은 거울처럼 좌우를 바꿔 보여 준다
+  mem.lastSeen = performance.now();
 }
 
 /* ---------- 얼굴 추적 ---------- */
 const cam = $('#cam');
 let landmarker = null, hands = null, lastVT = -1, myPacket = null, myPacketAt = 0, lastFace = 0, baseX = null, baseY = null;
-let lastHand = 0, myG = 0, myHa = 0, gPrev = 0;
+let lastHand = 0, myG = 0, myHL = null, myHR = null; const handPrev = [0, 0, 0];
 const m4 = new THREE.Matrix4(), tmpE = new THREE.Euler(), tmpL = new THREE.Vector2();
 async function startCamera() {
   try {
@@ -445,7 +485,7 @@ async function startCamera() {
     return true;
   } catch (err) { console.warn(err); S.camOn = false; return false; }
 }
-function stopCamera() { cam.srcObject?.getTracks().forEach((t) => t.stop()); cam.srcObject = null; S.camOn = false; myPacket = null; myG = 0; iAmAway(false); }
+function stopCamera() { cam.srcObject?.getTracks().forEach((t) => t.stop()); cam.srcObject = null; S.camOn = false; myPacket = null; myG = 0; myHL = myHR = null; iAmAway(false); }
 function track(now) {
   if (!S.camOn || !landmarker) return;
   if (cam.readyState >= 2 && cam.currentTime !== lastVT) {
@@ -465,35 +505,41 @@ function track(now) {
       } else tmpL.set(0, 0);
       if (hands && now - lastHand > 130) { lastHand = now; readHands(r.faceLandmarks?.[0], now); }
       lastFace = now; iAmAway(false);
-      setMyPacket(enc(blend, tmpE, tmpL, myG, myHa));
+      setMyPacket(enc(blend, tmpE, tmpL, myG, myHL, myHR));
     }
   }
   if (S.awayOn && S.role !== 'host' && now - lastFace > AWAY_MS) iAmAway(true); // 진행자는 목소리로 계속 진행하므로 자리 비움 처리하지 않는다
 }
-// 손 위치로 손동작을 알아본다: 1 합장(두 손이 얼굴 아래 가운데에 모임), 2 손 들기(손이 얼굴 옆, 어깨 위쪽)
-// 손을 들었을 때는 팔꿈치가 있을 법한 자리에서 손까지의 각도를 구해, 캐릭터 팔뚝이 내 손 위치를 따라가게 한다
+// 손 위치로 손동작을 알아본다. 합장: 두 손이 얼굴 아래 가운데에 모임. 손 들기: 손이 얼굴 옆, 어깨 위쪽에 있음(왼손·오른손 따로)
+// 든 손은 팔꿈치가 있을 법한 자리에서 손까지의 각도를 구해, 캐릭터 팔뚝이 내 손 위치를 따라가게 한다
 function readHands(fl, now) {
-  let g = 0;
+  let pray = 0; const up = [null, null]; // up[0]: 화면 왼쪽에 보이는 손, up[1]: 오른쪽
   try {
     const hr = hands.detectForVideo(cam, now + 0.5), hs = hr.landmarks || [];
     if (fl && hs.length) {
       const chin = fl[152].y, fx = fl[1].x, fw = Math.abs(fl[454].x - fl[234].x) || 0.2, ar = (cam.videoHeight || 3) / (cam.videoWidth || 4);
       const palms = hs.map((h) => { let x = 0, y = 0; for (const i of [0, 5, 9, 13, 17]) { x += h[i].x; y += h[i].y; } return { x: x / 5, y: y / 5, h }; });
-      if (palms.length >= 2 && Math.hypot(palms[0].x - palms[1].x, (palms[0].y - palms[1].y) * ar) < fw && palms.every((p) => p.y > chin - (fw / ar) * 0.2)) g = 1;
-      else if (palms.length === 1 && Math.abs(palms[0].x - fx) < fw * 0.45 && palms[0].y > chin && palms[0].h[12].y < palms[0].h[0].y) g = 1; // 맞댄 손은 한 손으로 잡히기도 한다
-      if (!g) {
-        const up = palms.filter((p) => (p.y - chin) * ar < fw * 0.8 && Math.abs(p.x - fx) > fw * 0.55).sort((a, b) => a.y - b.y)[0];
-        if (up) {
-          const sgn = Math.sign(up.x - fx) || 1;
-          const vx = sgn * (up.x - (fx + sgn * 1.5 * fw)), vy = chin * ar + 1.3 * fw - up.y * ar;
-          myHa = clamp(Math.atan2(vx, Math.max(vy, 0.02)), -0.6, 1.3);
-          g = 2;
+      if (palms.length >= 2 && Math.hypot(palms[0].x - palms[1].x, (palms[0].y - palms[1].y) * ar) < fw && palms.every((p) => p.y > chin - (fw / ar) * 0.2 && Math.abs(p.x - fx) < fw * 0.9)) pray = 1;
+      else if (palms.length === 1 && Math.abs(palms[0].x - fx) < fw * 0.45 && palms[0].y > chin && palms[0].h[12].y < palms[0].h[0].y) pray = 1; // 맞댄 손은 한 손으로 잡히기도 한다
+      if (!pray) {
+        for (const p of palms) {
+          if ((p.y - chin) * ar >= fw * 0.8 || Math.abs(p.x - fx) <= fw * 0.55) continue; // 어깨 아래이거나 얼굴 앞이면 든 것으로 보지 않는다
+          const sgn = p.x < fx ? -1 : 1, i = sgn < 0 ? 0 : 1;
+          const vx = sgn * (p.x - (fx + sgn * 1.5 * fw)), vy = chin * ar + 1.3 * fw - p.y * ar;
+          const ang = clamp(Math.atan2(vx, Math.max(vy, 0.02)), -0.6, 1.3);
+          if (up[i] == null || ang < up[i]) up[i] = ang;
         }
       }
     }
   } catch (e) { /* 다음에 다시 */ }
-  if (g === gPrev) myG = g; // 두 번 연속 같은 결과일 때만 바꾼다
-  gPrev = g;
+  // 켜고 끄는 것은 두 번 연속 같은 결과일 때만 바꾸고(깜빡임 방지), 각도는 바로 따라간다
+  const cur = [pray, up[0] != null ? 1 : 0, up[1] != null ? 1 : 0];
+  const st = [myG === 1 ? 1 : 0, myHL != null ? 1 : 0, myHR != null ? 1 : 0];
+  for (let i = 0; i < 3; i++) if (cur[i] === handPrev[i]) st[i] = cur[i];
+  handPrev[0] = cur[0]; handPrev[1] = cur[1]; handPrev[2] = cur[2];
+  myHL = st[1] ? (up[0] != null ? up[0] : myHL != null ? myHL : 0) : null;
+  myHR = st[2] ? (up[1] != null ? up[1] : myHR != null ? myHR : 0) : null;
+  myG = st[0] ? 1 : myHL != null || myHR != null ? 2 : 0;
 }
 function setMyPacket(pk) { myPacket = pk; myPacketAt = performance.now(); const me = members.get(S.myId); if (me) applyPacket(me, pk, true); }
 // 카메라에 얼굴이 한동안 안 보이면 자리를 비운 것으로 알린다
@@ -877,27 +923,34 @@ function animate(mem, now, dt, t, a) {
   p.lean.lerp(mem.target.lean, a * 0.5);
   p.talk = lerp(p.talk, clamp(((p.blend.jawOpen || 0) - 0.06) / 0.28, 0, 1), a);
   p.g = lost ? 0 : mem.target.g;
-  p.ha = lerp(p.ha, mem.target.ha, a);
+  p.hl = lost ? null : mem.target.hl; p.hr = lost ? null : mem.target.hr;
   // 자리가 바뀌면 부드럽게 옮겨 앉는다
   const m = 1 - Math.pow(0.02, dt);
   c.base = lerp(c.base, seat.base, m); c.h = lerp(c.h, seat.h, m);
-  const edge = seat.x < W / 2 ? -seat.h * 0.5 : W + seat.h * 0.5;
-  let x = c.x = lerp(c.x, seat.x, m), sit = 1, up = 0, squat = 1, step = 0;
-  const u = (now - mem.t0) / 1000;
+  const edge = seat.x < W / 2 ? -seat.h * 0.6 : W + seat.h * 0.6;
+  let x = c.x = lerp(c.x, seat.x, m), sit = 1, up = 0, squat = 1, walk = 0, step = 0, dir = 1;
+  const u = mem.fixU != null ? mem.fixU : (now - mem.t0) / 1000; // fixU: 점검용으로 장면을 한 순간에 멈춰 볼 때만 쓴다
   if (mem.st === 'wait' || mem.st === 'gone') { inst.root.visible = false; return; }
+  // 걷기: 키에 맞는 일정한 속도로 걷고, 걸은 거리만큼 걸음을 옮긴다(발이 미끄러져 보이지 않게)
+  const speed = seat.h * 1.15, dist = Math.abs(seat.x - edge), walkT = dist / speed, stride = seat.h * 0.62;
+  const walking = (d) => { walk = inst.canWalk ? 1 : 0; up = inst.canWalk ? 0 : 1; sit = 0; squat = 0; step = (d / stride) * Math.PI; };
   if (mem.st === 'entering') {
-    if (u < WALK_S) { x = lerp(edge, seat.x, ease(u / WALK_S)); sit = 0; up = Math.min(1, u * 4); squat = 0; step = u * 9; }
-    else if (u < WALK_S + SIT_S) { const k = ease((u - WALK_S) / SIT_S); sit = k; up = 1 - k; squat = k; }
+    dir = edge < seat.x ? 1 : -1;
+    if (u < walkT) { x = edge + dir * speed * u; walking(speed * u); const f = Math.min(1, u * 5); walk *= f; up *= f; }
+    else if (u < walkT + TURN_S) { const k = (u - walkT) / TURN_S; sit = 0; squat = 0; up = inst.canWalk ? k : 1; walk = inst.canWalk ? 1 - k : 0; step = (dist / stride) * Math.PI; } // 정면으로 돌아선다
+    else if (u < walkT + TURN_S + SIT_S) { const k = ease((u - walkT - TURN_S) / SIT_S); sit = k; up = 1 - k; squat = k; }
     else { mem.st = 'seated'; label(mem); }
   } else if (mem.st === 'leaving') {
+    dir = edge < seat.x ? -1 : 1;
     if (u < SIT_S) { const k = ease(u / SIT_S); sit = 1 - k; up = k; squat = 1 - k; }
-    else if (u < SIT_S + WALK_S) { const v = (u - SIT_S) / WALK_S; x = lerp(seat.x, edge, ease(v)); sit = 0; up = Math.min(1, (1 - v) * 4); squat = 0; step = v * WALK_S * 9; }
+    else if (u < SIT_S + TURN_S) { const k = (u - SIT_S) / TURN_S; sit = 0; squat = 0; up = inst.canWalk ? 1 - k : 1; walk = inst.canWalk ? k : 0; }
+    else if (u < SIT_S + TURN_S + walkT) { const d = speed * (u - SIT_S - TURN_S); x = seat.x + dir * d; walking(d); const f = Math.min(1, (walkT - (u - SIT_S - TURN_S)) * 5); walk *= f; up *= f; }
     else { mem.st = 'gone'; label(mem); inst.root.visible = false; return; }
   }
   inst.root.visible = true;
   inst.root.position.set(x, innerHeight - c.base, 0);
   inst.root.scale.setScalar(c.h);
-  inst.draw(p, t, dt, Math.round(c.base) * 2, sit, up, squat, step);
+  inst.draw(p, t, dt, Math.round(c.base) * 2, sit, up, squat, walk, step, dir);
 }
 function tick() {
   requestAnimationFrame(tick);
