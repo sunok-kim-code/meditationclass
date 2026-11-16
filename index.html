@@ -55,6 +55,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 .chip[aria-pressed="true"]{background:#e9e2cf;color:#17201b;border-color:#e9e2cf;font-weight:600}
 .thumb{flex:0 0 auto;width:60px;height:60px;border-radius:12px;border:2px solid transparent;background-size:cover;background-position:center;padding:0}
 .thumb[aria-pressed="true"]{border-color:#e9e2cf}
+.thumb.av{width:72px;height:84px;background-color:rgba(255,255,255,.08);background-size:contain;background-repeat:no-repeat}
 #over{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:rgba(13,17,16,.8)}
 #over p{margin:0;max-width:30ch;font-size:15px;line-height:1.6}
 #over button{min-height:48px;padding:0 24px;border:0;border-radius:999px;background:#e9e2cf;color:#17201b;font-weight:600}
@@ -63,8 +64,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 <script type="importmap">
 {"imports":{
 "three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
-"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
-"@pixiv/three-vrm":"https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3/lib/three-vrm.module.min.js"
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
 }}
 </script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -114,117 +114,102 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 
 <script type="module">
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
 const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
 const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+// neck: 목 위치(이미지 위에서부터의 비율). 이 위쪽이 고개 움직임을 따라간다.
 const AVATARS = [
-  { id: 'a', label: '캐릭터 A', url: 'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@v0.6.11/packages/three-vrm/examples/models/three-vrm-girl.vrm' },
-  { id: 'b', label: '캐릭터 B', url: 'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@dev/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm' },
+  { id: 'yoga', label: '요가복', neck: 0.283 },
+  { id: 'hanbok', label: '생활한복', neck: 0.266 },
+  { id: 'knit', label: '니트', neck: 0.285 },
+  { id: 'hoodie', label: '후드티', neck: 0.262 },
+  { id: 'bear', label: '곰', neck: 0.318 },
+  { id: 'cat', label: '고양이', neck: 0.366 },
 ];
-const BGS = [{ id: 'center', label: '명상 센터' }, { id: 'temple', label: '산사' }, { id: 'beach', label: '바닷가' }, { id: 'mountain', label: '산' }];
+const BGS = [{ id: 'center', label: '명상 센터' }, { id: 'temple', label: '산사' }, { id: 'bamboo', label: '대나무 숲' }, { id: 'beach', label: '바닷가' }, { id: 'mountain', label: '산' }, { id: 'night', label: '밤하늘' }];
 const bgUrl = (id, thumb) => `bg/${thumb ? 'thumb-' : ''}${id}.jpg`;
 const KEYS = ['eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen', 'mouthFunnel', 'mouthPucker', 'mouthSmileLeft', 'mouthSmileRight'];
 const MAX_GUESTS = 12, SEND_MS = 85, PREFIX = 'sunmedclass-';
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
-/* ---------- 3D ---------- */
+/* ---------- 그리기 ---------- */
 const canvas = $('#gl');
 const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.setScissorTest(true);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(24, 1, 0.05, 30);
-scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.7;
-const sun = new THREE.DirectionalLight(0xfff4e2, 1.6); sun.position.set(0.6, 1.4, 1.4); scene.add(sun);
-scene.add(new THREE.HemisphereLight(0xdfeaf2, 0x39422f, 0.9));
-THREE.Cache.enabled = true;
-const loader = new GLTFLoader();
-loader.register((p) => new VRMLoaderPlugin(p));
-
+const texLoader = new THREE.TextureLoader();
+const texCache = new Map();
+const loadTex = (url) => {
+  if (!texCache.has(url)) texCache.set(url, texLoader.loadAsync(url).then((t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; }));
+  return texCache.get(url);
+};
 const shadowTex = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 128;
   const g = c.getContext('2d'), r = g.createRadialGradient(64, 64, 4, 64, 64, 64);
-  r.addColorStop(0, 'rgba(0,0,0,.5)'); r.addColorStop(1, 'rgba(0,0,0,0)');
+  r.addColorStop(0, 'rgba(0,0,0,.45)'); r.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = r; g.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
 })();
-const clamp01 = (v) => Math.min(1, Math.max(0, v));
-const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1);
+const VERT = `
+uniform vec3 uRot; uniform float uNeck; uniform float uBreath; uniform float uW;
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  vec2 p = position.xy;
+  float torso = smoothstep(-0.32, 0.05, p.y);
+  p.y += uBreath * torso * 0.006;
+  p.x *= 1.0 + uBreath * torso * 0.004;
+  float w = smoothstep(uNeck - 0.035, uNeck + 0.05, position.y);
+  vec2 q = p - vec2(0.0, uNeck);
+  float c = cos(uRot.z * w), s = sin(uRot.z * w);
+  q = vec2(c * q.x - s * q.y, s * q.x + c * q.y);
+  q.x = q.x * (1.0 - 0.10 * abs(uRot.y) * w) + uRot.y * 0.085 * uW * w;
+  q.y = q.y * (1.0 - 0.16 * uRot.x * w) - uRot.x * 0.012 * w;
+  p = q + vec2(0.0, uNeck);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 0.0, 1.0);
+}`;
+const FRAG = `
+uniform sampler2D tOpen; uniform sampler2D tClosed; uniform float uBlink;
+varying vec2 vUv;
+void main() {
+  vec4 a = texture2D(tOpen, vUv), b = texture2D(tClosed, vUv);
+  gl_FragColor = mix(a, b, uBlink);
+  if (gl_FragColor.a < 0.01) discard;
+  #include <colorspace_fragment>
+}`;
 
-// 앉은 명상 자세 (반가부좌에 가까운 형태, 손은 무릎 위)
-const POSE = { hipFlex: -1.5, hipOut: 0.95, hipTwist: 1.2, knee: 2.45, foot: -0.5, armZ: -1.12, armFwd: -0.42, elbow: -0.55, wrist: 0.2 };
-function sit(vrm, s) {
-  const bone = (n) => vrm.humanoid.getNormalizedBoneNode(n);
-  const q = (ax, a) => new THREE.Quaternion().setFromAxisAngle(ax, a);
-  const qx = (a) => q(AX, a * s), qy = (a) => q(AY, a), qz = (a) => q(AZ, a * s);
-  for (const [side, k] of [['left', 1], ['right', -1]]) {
-    const ul = bone(side + 'UpperLeg'), ll = bone(side + 'LowerLeg'), ft = bone(side + 'Foot');
-    const ua = bone(side + 'UpperArm'), la = bone(side + 'LowerArm'), hd = bone(side + 'Hand');
-    if (ul) ul.quaternion.copy(qy(k * POSE.hipOut)).multiply(qx(POSE.hipFlex)).multiply(qy(k * POSE.hipTwist));
-    if (ll) ll.quaternion.copy(qx(POSE.knee));
-    if (ft) ft.quaternion.copy(qx(POSE.foot));
-    if (ua) ua.quaternion.copy(qy(k * POSE.armFwd)).multiply(qz(k * POSE.armZ));
-    if (la) la.quaternion.copy(qy(k * POSE.elbow));
-    if (hd) hd.quaternion.copy(qz(k * POSE.wrist));
-  }
-}
-
+// 앉은 자세로 그려진 2D 캐릭터. 목 위쪽을 고개 움직임에 맞춰 휘고, 눈 뜬/감은 그림을 섞는다.
 async function makeAvatar(defId) {
   const def = AVATARS.find((a) => a.id === defId) || AVATARS[0];
-  const gltf = await loader.loadAsync(def.url);
-  const vrm = gltf.userData.vrm;
-  if (!vrm) throw new Error('VRM 데이터를 찾지 못했습니다');
-  const s = vrm.meta?.metaVersion === '0' ? -1 : 1;
-  VRMUtils.rotateVRM0(vrm);
-  vrm.scene.traverse((o) => { o.frustumCulled = false; });
-  const bone = (n) => vrm.humanoid.getNormalizedBoneNode(n);
-  const head = bone('head'), neck = bone('neck'), chest = bone('upperChest') || bone('chest') || bone('spine');
-  sit(vrm, s);
-  vrm.update(0);
-  vrm.scene.updateMatrixWorld(true);
-  const wp = (n) => { const b = vrm.humanoid.getRawBoneNode(n); return b ? b.getWorldPosition(new THREE.Vector3()) : null; };
-  const pts = ['head', 'hips', 'leftLowerLeg', 'rightLowerLeg', 'leftFoot', 'rightFoot', 'leftHand', 'rightHand'].map(wp).filter(Boolean);
-  const hp = wp('head') || new THREE.Vector3(0, 1.4, 0);
-  const top = hp.y + 0.24, bottom = Math.min(...pts.map((p) => p.y)) - 0.1;
-  const halfW = Math.max(...pts.map((p) => Math.abs(p.x))) + 0.14;
-  const zMid = (Math.max(...pts.map((p) => p.z)) + Math.min(...pts.map((p) => p.z))) / 2;
-  const root = new THREE.Group();
-  root.add(vrm.scene);
-  const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
-  sh.rotation.x = -Math.PI / 2; sh.position.set(0, bottom + 0.06, zMid); sh.scale.set(halfW * 2.5, halfW * 1.9, 1);
-  root.add(sh);
-  root.visible = false;
-  const em = vrm.expressionManager;
-  const setE = (n, v) => { if (em && em.getExpression(n)) em.setValue(n, clamp01(v)); };
+  const [tOpen, tClosed] = await Promise.all([loadTex(`avatars/${def.id}-open.webp`), loadTex(`avatars/${def.id}-closed.webp`)]);
+  const W = tOpen.image.width / tOpen.image.height, neck = 0.5 - def.neck;
+  const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthTest: false,
+    uniforms: { tOpen: { value: tOpen }, tClosed: { value: tClosed }, uBlink: { value: 0 }, uRot: { value: new THREE.Vector3() }, uNeck: { value: neck }, uBreath: { value: 0 }, uW: { value: W } } });
+  const body = new THREE.Mesh(new THREE.PlaneGeometry(W, 1, 24, 48), mat);
+  body.renderOrder = 1;
+  const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthTest: false }));
+  sh.position.set(0, -0.47, 0); sh.scale.set(W * 1.15, 0.12, 1);
+  const root = new THREE.Group(); root.add(sh, body); root.visible = false;
+  let blink = 0;
   return {
-    defId: def.id, root,
-    center: new THREE.Vector3(0, (top + bottom) / 2, zMid), halfH: (top - bottom) / 2, halfW,
+    defId: def.id, root, center: new THREE.Vector3(0, 0, 0), halfH: 0.52, halfW: W / 2 + 0.02,
     update(p, dt, t) {
-      const e = p.euler;
-      if (head) head.rotation.set(e.x * 0.6 * s, e.y * 0.6, e.z * 0.6 * s);
-      if (neck) neck.rotation.set(e.x * 0.3 * s, e.y * 0.3, e.z * 0.3 * s);
-      if (chest) chest.rotation.set(Math.sin(t * 0.9 + p.phase) * 0.014 * s, e.y * 0.12, e.z * 0.08 * s);
-      const b = p.blend;
-      setE('blinkLeft', (b.eyeBlinkLeft || 0) * 1.25);
-      setE('blinkRight', (b.eyeBlinkRight || 0) * 1.25);
-      setE('aa', (b.jawOpen || 0) * 1.4);
-      setE('oh', b.mouthFunnel || 0);
-      setE('ou', (b.mouthPucker || 0) * 0.8);
-      setE('happy', ((b.mouthSmileLeft || 0) + (b.mouthSmileRight || 0)) * 0.3);
-      vrm.update(dt);
+      mat.uniforms.uRot.value.set(p.euler.x, p.euler.y, p.euler.z);
+      mat.uniforms.uBreath.value = Math.sin(t * 0.9 + p.phase);
+      const b = Math.max(p.blend.eyeBlinkLeft || 0, p.blend.eyeBlinkRight || 0);
+      blink = THREE.MathUtils.clamp((b - 0.25) / 0.35, 0, 1);
+      mat.uniforms.uBlink.value = blink;
     },
-    dispose() { scene.remove(root); try { VRMUtils.deepDispose(vrm.scene); } catch (e) { /* 무시 */ } },
+    dispose() { scene.remove(root); body.geometry.dispose(); mat.dispose(); sh.geometry.dispose(); sh.material.dispose(); },
   };
 }
 
 /* ---------- 상태 ---------- */
-const S = { role: null, code: '', myId: null, name: '', avatar: 'a', bg: BGS[0].id, peer: null, hostConn: null, conns: new Map(), calls: new Map(), mic: null, micOn: true, bowl: false, camOn: false, ended: false };
+const S = { role: null, code: '', myId: null, name: '', avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)].id, bg: BGS[0].id, peer: null, hostConn: null, conns: new Map(), calls: new Map(), mic: null, micOn: true, bowl: false, camOn: false, ended: false };
 const members = new Map(); // id -> { id, name, avatar, host, slot, inst, token, pose, target, lastSeen }
 const statusEl = $('#status');
 const say = (t, bad) => { statusEl.textContent = t; statusEl.classList.toggle('bad', !!bad); };
@@ -353,7 +338,7 @@ function onHostData(conn, msg) {
   const id = conn.peer;
   if (msg.t === 'hello') {
     if (S.conns.size >= MAX_GUESTS) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 300); return; }
-    const m = { id, name: String(msg.name || '참가자').slice(0, 12), avatar: AVATARS.some((a) => a.id === msg.avatar) ? msg.avatar : 'a', host: false };
+    const m = { id, name: String(msg.name || '참가자').slice(0, 12), avatar: AVATARS.some((a) => a.id === msg.avatar) ? msg.avatar : AVATARS[0].id, host: false };
     S.conns.set(id, conn); addMember(m);
     conn.send({ t: 'room', you: id, bg: S.bg, members: roster() });
     cast({ t: 'join', m }, id);
@@ -435,7 +420,7 @@ function openSheet(kind) {
   if (kind === 'avatar') {
     sh.append(el('h2', null, '내 아바타'));
     const row = el('div', 'row');
-    for (const a of AVATARS) { const b = el('button', 'chip', a.label); b.type = 'button'; b.setAttribute('aria-pressed', String(a.id === S.avatar)); b.addEventListener('click', () => { pickAvatar(a.id); sh.hidden = true; }); row.append(b); }
+    for (const a of AVATARS) { const b = el('button', 'thumb av'); b.type = 'button'; b.setAttribute('aria-label', a.label); b.setAttribute('aria-pressed', String(a.id === S.avatar)); b.style.backgroundImage = `url(avatars/thumb-${a.id}.webp)`; b.addEventListener('click', () => { pickAvatar(a.id); sh.hidden = true; }); row.append(b); }
     sh.append(row);
   } else {
     sh.append(el('h2', null, '배경 (모두에게 바뀝니다)'));
@@ -558,14 +543,13 @@ function tick() {
     camera.aspect = r.width / r.height;
     const dist = Math.max(inst.halfH / tan, inst.halfW / (tan * camera.aspect)) * 1.04;
     const up = Math.max(0, dist * tan - inst.halfH * 1.04); // 가로 폭에 맞춰질 때는 슬롯 바닥에 붙여 앉힌다
-    camera.position.set(inst.center.x, inst.center.y + up + dist * 0.12, inst.center.z + dist);
-    camera.lookAt(inst.center.x, inst.center.y + up, inst.center.z); camera.updateProjectionMatrix();
+    camera.position.set(0, up, dist); camera.lookAt(0, up, 0); camera.updateProjectionMatrix();
     inst.root.visible = true; renderer.render(scene, camera); inst.root.visible = false;
   }
 }
 
 /* ---------- 시작 ---------- */
-window.__cls = { S, members, POSE, setMyPacket, enc, repose: () => { for (const m of members.values()) loadInst(m); } };
+window.__cls = { S, members, setMyPacket, enc, repose: () => { for (const m of members.values()) loadInst(m); } };
 try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; } catch (e) { /* 무시 */ }
 const preset = new URLSearchParams(location.search).get('room');
 if (preset && /^[A-Za-z0-9]{6}$/.test(preset)) $('#code').value = preset.toUpperCase();
