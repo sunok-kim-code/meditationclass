@@ -56,6 +56,15 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 .thumb{flex:0 0 auto;width:60px;height:60px;border-radius:12px;border:2px solid transparent;background-size:cover;background-position:center;padding:0}
 .thumb[aria-pressed="true"]{border-color:#e9e2cf}
 .thumb.av{width:72px;height:84px;background-color:rgba(255,255,255,.08);background-size:contain;background-repeat:no-repeat}
+.thumb.add{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:1px dashed rgba(255,255,255,.4);font-size:11px;line-height:1.25;color:#e8ece6}
+.thumb.add b{font-size:22px;font-weight:400;line-height:1}
+#maker{position:fixed;inset:0;z-index:60;overflow:auto;background:#0f1513;padding:calc(18px + env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom))}
+#maker .panel{max-width:420px;margin:0 auto}
+#maker h2{margin:0 0 6px;font-size:17px;font-weight:600}
+#maker .row{display:flex;gap:8px;margin-top:14px}
+#maker .prev{display:block;max-width:100%;max-height:34vh;margin:14px auto 0;border-radius:14px}
+#maker .t{margin-top:14px}
+.primary:disabled{opacity:.45}
 #over{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:rgba(13,17,16,.8)}
 #over p{margin:0;max-width:30ch;font-size:15px;line-height:1.6}
 #over button{min-height:48px;padding:0 24px;border:0;border-radius:999px;background:#e9e2cf;color:#17201b;font-weight:600}
@@ -112,6 +121,8 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
   </div>
 </div>
 
+<div id="maker" hidden></div>
+
 <div id="over" hidden><p id="overMsg"></p><button type="button" id="overBtn">처음으로</button></div>
 
 <script type="module">
@@ -151,6 +162,156 @@ const $ = (s) => document.querySelector(s);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp;
 const ease = (k) => k * k * (3 - 2 * k);
+
+/* ---------- 사진으로 만든 아바타 ---------- */
+// 그림 파일은 서버에 두지 않는다. 만든 사람 기기(브라우저 저장소)에 보관하고, 수업에 들어가면 진행자를 거쳐 다른 참가자에게 직접 보낸다
+const CUSTOM = new Map(), CU_KEYS = ['open', 'closed', 'talk', 'pray', 'high', 'stand', 'walk'];
+const isCustomId = (id) => typeof id === 'string' && /^u[a-z0-9]{8}$/.test(id);
+const knownAvatar = (id) => AVATARS.some((a) => a.id === id) || isCustomId(id);
+const getDef = (id) => AVATARS.find((a) => a.id === id) || CUSTOM.get(id) || AVATARS[0]; // 아직 그림을 못 받은 사진 아바타는 잠시 기본 캐릭터로 보인다
+function registerCustom(id, p, files) {
+  if (!isCustomId(id) || !p || typeof p !== 'object' || !files || !(files.open instanceof Blob)) return false;
+  if (CUSTOM.has(id)) return true;
+  const num = (v, lo, hi, d) => (typeof v === 'number' && isFinite(v) ? clamp(v, lo, hi) : d);
+  const vec = (a, n) => (Array.isArray(a) && a.length === n && a.every((v) => typeof v === 'number' && isFinite(v)) ? a.map((v) => clamp(v, -8, 8)) : null);
+  const rect = (r) => { const uv = r && vec(r.uv, 4); return uv ? { uv, w: num(r.w, 0.05, 2, 0.5), h: num(r.h, 0.3, 1, 1), dx: num(r.dx, -0.5, 0.5, 0) } : null; };
+  const tf = p.tf || {}, open = vec(tf.open, 4); if (!open) return false;
+  const def = { id, custom: true, label: '내 사진 아바타', W: num(p.W, 0.3, 1.5, 0.66), neck: num(p.neck, 0.1, 0.6, 0.3), split: num(p.split, 0.05, 0.5, 0.2), hx: num(p.hx, -0.3, 0.3, 0), hw: num(p.hw, 0.03, 0.4, 0.12), sh: num(p.sh, 1, 2, 1.65), tf: { open }, url: {}, files: {}, stand: rect(p.stand), walkP: null, raw: p };
+  for (const k of CU_KEYS) {
+    const f = files[k]; if (!(f instanceof Blob) || f.size > 2.5e6) continue;
+    if (k === 'stand' ? !def.stand : k !== 'walk' && k !== 'open' && !(def.tf[k] = vec(tf[k], 4))) continue; // 맞춤 값이 없는 그림은 쓰지 않는다
+    def.files[k] = f; def.url[k] = URL.createObjectURL(f);
+  }
+  CUSTOM.set(id, def);
+  for (const m of [...members.values(), ...ghosts]) if (m.avatar === id) loadInst(m);
+  return true;
+}
+function sendCustom(conn, id) {
+  const d = CUSTOM.get(id); if (!d || !conn || !conn.open) return;
+  (async () => {
+    try { for (const k of Object.keys(d.files)) { const buf = await d.files[k].arrayBuffer(); if (conn.open) conn.send({ t: 'cf', id, k, d: buf }); } if (conn.open) conn.send({ t: 'cd', id, p: d.raw }); }
+    catch (e) { console.warn('아바타 그림을 보내지 못했습니다', e); }
+  })();
+}
+const cuIn = new Map();
+// 받은 그림 조각을 모았다가, 마지막에 오는 설명(cd)까지 받으면 등록한다. 등록되면 그 아바타 번호를 돌려준다
+function recvCustom(msg) {
+  if (!isCustomId(msg.id) || CUSTOM.has(msg.id)) return null;
+  if (msg.t === 'cf') {
+    if (!CU_KEYS.includes(msg.k) || !msg.d) return null;
+    const b = new Blob([msg.d], { type: 'image/webp' }); if (b.size > 2.5e6) return null;
+    if (cuIn.size > 30) cuIn.clear();
+    const e = cuIn.get(msg.id) || {}; e[msg.k] = b; cuIn.set(msg.id, e); return null;
+  }
+  const files = cuIn.get(msg.id); cuIn.delete(msg.id);
+  return files && registerCustom(msg.id, msg.p, files) ? msg.id : null;
+}
+// 내가 만든 아바타는 이 기기에 저장해 두고 다음에도 쓴다
+const kv = (mode, fn) => new Promise((res, rej) => {
+  const o = indexedDB.open('medclass', 1);
+  o.onupgradeneeded = () => o.result.createObjectStore('kv'); o.onerror = () => rej(o.error);
+  o.onsuccess = () => { const db = o.result, tx = db.transaction('kv', mode), rq = fn(tx.objectStore('kv')); tx.oncomplete = () => { db.close(); res(rq && rq.result); }; tx.onerror = () => { db.close(); rej(tx.error); }; };
+});
+
+// --- 그림 읽기: 투명도만 뽑아 위치·크기를 잰다
+async function readAlpha(blob) {
+  const bmp = await createImageBitmap(blob), W0 = bmp.width, H0 = bmp.height, f = Math.min(1, 640 / H0), w = Math.round(W0 * f), h = Math.round(H0 * f);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(bmp, 0, 0, w, h); if (bmp.close) bmp.close();
+  const px = g.getImageData(0, 0, w, h).data, a = new Uint8Array(w * h); let clear = 0;
+  for (let i = 0; i < a.length; i++) { a[i] = px[i * 4 + 3]; if (a[i] < 16) clear++; }
+  return { a, w, h, k: W0 / w, W0, H0, clear: clear / a.length }; // k: 잰 값 → 원본 픽셀
+}
+function boxOf(d, th = 60, xa = 0, xb = d.w) {
+  let x0 = d.w, x1 = -1, y0 = d.h, y1 = -1;
+  for (let y = 0; y < d.h; y++) for (let x = xa; x < xb; x++) if (d.a[y * d.w + x] > th) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return x1 < 0 ? null : { x0, x1, y0, y1 };
+}
+// 다리·방석 부분(아래쪽 frac 구간)의 좌우 끝과 바닥
+function legsOf(d, frac) {
+  const b = boxOf(d); if (!b) return null;
+  let l = d.w, r = -1;
+  for (let y = Math.round(b.y1 - frac * (b.y1 - b.y0)); y <= b.y1; y++) for (let x = 0; x < d.w; x++) if (d.a[y * d.w + x] > 60) { if (x < l) l = x; if (x > r) r = x; }
+  if (r - l < 8) return null;
+  const cx = Math.round((l + r) / 2), half = Math.max(2, Math.round(0.06 * (r - l)));
+  let ht = b.y0; outer: for (let y = 0; y < d.h; y++) for (let x = cx - half; x <= cx + half; x++) if (d.a[y * d.w + x] > 60) { ht = y; break outer; } // 정수리: 가운데 띠에서 가장 위
+  return { l, r, b: b.y1, top: b.y0, ht };
+}
+// 변형 그림을 기본 그림 틀(vc)에 맞추는 변환: 다리 폭으로 크기를, 방석 바닥과 정수리로 세로를 맞춘다
+function fitTf(base, vc, d, frac) {
+  const lg = legsOf(d, frac); if (!lg) return null;
+  const K = base.d.k, k = d.k, sc = ((base.lg.r - base.lg.l) * K) / ((lg.r - lg.l) * k);
+  if (!(sc > 0.5 && sc < 2)) return null;
+  let sy = ((base.lg.b - base.lg.ht) * K) / ((lg.b - lg.ht) * k); if (!(sy / sc > 0.9 && sy / sc < 1.1)) sy = sc;
+  const bx = ((base.lg.l + base.lg.r) / 2) * K, bb = base.lg.b * K, X0 = vc.x0 * K, Y0 = vc.y0 * K, VW = (vc.x1 - vc.x0) * K, VH = (vc.y1 - vc.y0) * K;
+  const r4 = (v) => +v.toFixed(5);
+  return [r4(VW / sc / d.W0), r4(VH / sy / d.H0), r4((((lg.l + lg.r) / 2) * k + (X0 - bx) / sc) / d.W0), r4(1 - (lg.b * k + (Y0 + VH - bb) / sy) / d.H0)];
+}
+// 걷기 그림 한 장에서 네 장면을 떼어 낸다. 장면끼리 발이 엇갈려 있어도 되도록, 이어진 덩어리 단위로 나눈다 (받는 쪽 기기에서도 똑같이 계산한다)
+async function walkFrames(blob) {
+  const bmp = await createImageBitmap(blob), f = Math.min(1, 768 / bmp.height), w = Math.round(bmp.width * f), h = Math.round(bmp.height * f);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(bmp, 0, 0, w, h); if (bmp.close) bmp.close();
+  const img = g.getImageData(0, 0, w, h), px = img.data, lab = new Int32Array(w * h), stack = new Int32Array(w * h), comps = [];
+  for (let i0 = 0; i0 < lab.length; i0++) {
+    if (lab[i0] || px[i0 * 4 + 3] <= 40) continue;
+    const L = comps.length + 1, q = { L, n: 0, x0: w, x1: 0, y0: h, y1: 0, sx: 0 }; let sp = 0; stack[sp++] = i0; lab[i0] = L;
+    while (sp) {
+      const i = stack[--sp], x = i % w, y = (i - x) / w; q.n++; q.sx += x;
+      if (x < q.x0) q.x0 = x; if (x > q.x1) q.x1 = x; if (y < q.y0) q.y0 = y; if (y > q.y1) q.y1 = y;
+      if (x > 0 && !lab[i - 1] && px[(i - 1) * 4 + 3] > 40) { lab[i - 1] = L; stack[sp++] = i - 1; }
+      if (x < w - 1 && !lab[i + 1] && px[(i + 1) * 4 + 3] > 40) { lab[i + 1] = L; stack[sp++] = i + 1; }
+      if (y > 0 && !lab[i - w] && px[(i - w) * 4 + 3] > 40) { lab[i - w] = L; stack[sp++] = i - w; }
+      if (y < h - 1 && !lab[i + w] && px[(i + w) * 4 + 3] > 40) { lab[i + w] = L; stack[sp++] = i + w; }
+    }
+    comps.push(q);
+  }
+  const big = Math.max(0, ...comps.map((q) => q.n)), four = comps.filter((q) => q.n > 0.25 * big).sort((a, b) => a.sx / a.n - b.sx / b.n);
+  if (four.length !== 4) throw new Error(`walk blobs ${four.length}`);
+  // 가장자리의 옅은 픽셀은 붙어 있는 덩어리에 넣어 준다 (윤곽이 거칠어지지 않게)
+  for (let pass = 0; pass < 2; pass++) { const add = []; for (let i = 0; i < lab.length; i++) { if (lab[i] || !px[i * 4 + 3]) continue; const x = i % w; const L = (x > 0 && lab[i - 1]) || (x < w - 1 && lab[i + 1]) || (i >= w && lab[i - w]) || (i < lab.length - w && lab[i + w]); if (L) add.push(i, L); } for (let j = 0; j < add.length; j += 2) lab[add[j]] = add[j + 1]; }
+  const hmax = Math.max(...four.map((q) => q.y1 + 1 - q.y0));
+  return four.map((q) => {
+    const x0 = Math.max(q.x0 - 2, 0), y0 = Math.max(q.y0 - 2, 0), bw = Math.min(q.x1 + 3, w) - x0, bh = Math.min(q.y1 + 3, h) - y0;
+    const fc = document.createElement('canvas'); fc.width = bw; fc.height = bh;
+    const out = new ImageData(bw, bh), o = out.data; let sx = 0, n = 0; const headRows = q.y0 + 0.16 * (q.y1 - q.y0);
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) { const i = (y0 + y) * w + x0 + x; if (lab[i] !== q.L) continue; const j = (y * bw + x) * 4; o[j] = px[i * 4]; o[j + 1] = px[i * 4 + 1]; o[j + 2] = px[i * 4 + 2]; o[j + 3] = px[i * 4 + 3]; if (y0 + y < headRows) { sx += x0 + x; n++; } }
+    fc.getContext('2d').putImageData(out, 0, 0);
+    const tex = new THREE.CanvasTexture(fc); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    return { tex, r: { w: bw / hmax, h: (q.y1 + 1 - q.y0 + 2) / hmax, dx: (x0 + bw / 2 - (n ? sx / n : x0 + bw / 2)) / hmax } };
+  });
+}
+// 그림 한 벌을 재서 아바타 설명값을 만든다
+async function measureCustom(files) {
+  const d = await readAlpha(files.open), b16 = boxOf(d, 16), b = boxOf(d), lg = legsOf(d, 0.33);
+  if (!b16 || !b || !lg || d.clear < 0.12) throw new Error('opaque'); // 배경이 투명하게 나오지 않았다
+  const m = Math.round(0.012 * d.h), vc = { x0: Math.max(b16.x0 - m, 0), y0: Math.max(b16.y0 - m, 0), x1: Math.min(b16.x1 + 1 + m, d.w), y1: Math.min(b16.y1 + 1 + m, d.h) };
+  const VW = vc.x1 - vc.x0, VH = vc.y1 - vc.y0, base = { d, lg };
+  // 목: 머리 아래에서 실루엣 폭이 가장 좁아지는 높이
+  const wid = new Float32Array(d.h); for (let y = 0; y < d.h; y++) { let n = 0; for (let x = 0; x < d.w; x++) if (d.a[y * d.w + x] > 60) n++; wid[y] = n; }
+  const sm = (y) => { let t = 0; for (let j = -2; j <= 2; j++) t += wid[clamp(y + j, 0, d.h - 1)]; return t / 5; };
+  const top = b.y0, fh = b.y1 - b.y0; let head = top, ny = top;
+  for (let y = top; y < top + 0.3 * fh; y++) if (sm(y) > sm(head)) head = y;
+  ny = head; for (let y = head; y < top + 0.5 * fh; y++) if (sm(y) < sm(ny)) ny = y;
+  if (!(sm(ny) < sm(head) * 0.9) || (ny - top) / fh < 0.18 || (ny - top) / fh > 0.45) ny = Math.round(top + 0.3 * fh);
+  let hx0 = d.w, hx1 = 0; for (let y = top; y < ny; y++) for (let x = 0; x < d.w; x++) if (d.a[y * d.w + x] > 60) { if (x < hx0) hx0 = x; if (x > hx1) hx1 = x; }
+  const r3 = (v) => +v.toFixed(4), hw = (hx1 - hx0) / 2 / VH;
+  const p = { W: r3(VW / VH), neck: r3((ny - vc.y0) / VH), split: r3((top + 0.68 * (ny - top) - vc.y0) / VH), hx: r3(((hx0 + hx1) / 2 - (vc.x0 + vc.x1) / 2) / VH), hw: r3(hw), sh: 1.65, tf: { open: fitTf(base, vc, d, 0.33) }, stand: null };
+  for (const k of ['closed', 'talk', 'pray', 'high']) {
+    if (!files[k]) continue;
+    try { const dv = await readAlpha(files[k]); if (dv.clear >= 0.12) p.tf[k] = fitTf(base, vc, dv, k === 'high' ? 0.33 * 0.78 : 0.33); } catch (e) { console.warn(k, e); }
+  }
+  if (files.stand) try {
+    const ds = await readAlpha(files.stand), bs = boxOf(ds, 16);
+    if (bs && ds.clear >= 0.12) {
+      const bh = bs.y1 + 1 - bs.y0; let s0 = ds.w, s1 = 0;
+      for (let y = bs.y0; y < bs.y0 + 0.115 * bh; y++) for (let x = 0; x < ds.w; x++) if (ds.a[y * ds.w + x] > 60) { if (x < s0) s0 = x; if (x > s1) s1 = x; }
+      if (s1 > s0) p.sh = r3(clamp((2 * hw) / ((s1 - s0) / bh), 1.5, 1.85)); // 선 그림의 머리가 앉은 그림의 머리와 같은 크기가 되는 키
+      p.stand = { uv: [r3(bs.x0 / ds.w), r3(1 - (bs.y1 + 1) / ds.h), r3((bs.x1 + 1) / ds.w), r3(1 - bs.y0 / ds.h)], w: r3((bs.x1 + 1 - bs.x0) / bh), h: 1, dx: 0 };
+    }
+  } catch (e) { console.warn('stand', e); }
+  return p;
+}
 
 /* ---------- 그리기 ---------- */
 const canvas = $('#gl');
@@ -206,16 +367,22 @@ const FRAG = `
 uniform sampler2D tOpen; uniform sampler2D tClosed; uniform sampler2D tTalk; uniform sampler2D tPose; uniform sampler2D tHigh;
 uniform float uBlink; uniform float uTalk; uniform vec2 uPose; uniform vec2 uHigh; uniform float uAlpha;
 uniform float uNeck; uniform float uSplit; uniform vec2 uHead; uniform float uHeadHi;
+uniform vec4 uTfO; uniform vec4 uTfC; uniform vec4 uTfT; uniform vec4 uTfP; uniform vec4 uTfH;
 varying vec2 vUv; varying vec2 vL;
+// 사진으로 만든 아바타는 그림마다 크기·위치가 달라서, 기본 그림 틀에 맞추는 변환을 거쳐 읽는다 (기본 캐릭터는 변환 없음)
+vec4 smp(sampler2D t, vec4 tf) {
+  vec2 q = vUv * tf.xy + tf.zw;
+  return texture2D(t, q) * (step(0.0, q.x) * step(q.x, 1.0) * step(0.0, q.y) * step(q.y, 1.0));
+}
 void main() {
-  vec4 o = texture2D(tOpen, vUv);
-  vec4 eyes = mix(o, texture2D(tClosed, vUv), uBlink);
-  vec4 mouth = mix(o, texture2D(tTalk, vUv), uTalk);
+  vec4 o = smp(tOpen, uTfO);
+  vec4 eyes = mix(o, smp(tClosed, uTfC), uBlink);
+  vec4 mouth = mix(o, smp(tTalk, uTfT), uTalk);
   vec4 head = mix(mouth, eyes, smoothstep(uSplit - 0.012, uSplit + 0.012, vL.y));
   float sd = smoothstep(-0.03, 0.03, vL.x - uHead.x);
-  vec4 body = mix(o, texture2D(tPose, vUv), mix(uPose.x, uPose.y, sd)); // 화면 왼쪽 팔과 오른쪽 팔을 따로 든다
+  vec4 body = mix(o, smp(tPose, uTfP), mix(uPose.x, uPose.y, sd)); // 화면 왼쪽 팔과 오른쪽 팔을 따로 든다
   float hi = mix(uHigh.x, uHigh.y, sd);
-  body = mix(body, texture2D(tHigh, vUv), hi); // 머리 위로 높이 든 팔
+  body = mix(body, smp(tHigh, uTfH), hi); // 머리 위로 높이 든 팔
   float hw = mix(uHead.y, uHeadHi, hi); // 귀가 넓은 캐릭터는 든 팔이 귀 앞을 지나므로, 그때는 얼굴 폭만 기본 그림을 쓴다
   float hm = smoothstep(uNeck - 0.004, uNeck + 0.028, vL.y) * (1.0 - smoothstep(hw, hw * 1.16, abs(vL.x - uHead.x)));
   gl_FragColor = mix(body, head, hm);
@@ -226,16 +393,20 @@ void main() {
 
 // 앉은 그림(고개·몸 움직임, 눈·입 섞기, 좌우 팔 따로 들기, 머리 위로 뻗기) + 서 있는 그림 + 걷는 옆모습 네 장
 async function makeAvatar(defId) {
-  const def = AVATARS.find((a) => a.id === defId) || AVATARS[0];
-  const opt = (name) => loadTex(`avatars/${def.id}-${name}.webp`).catch(() => null);
+  const def = getDef(defId), cu = !!def.custom; // cu: 사진으로 만든 아바타
+  const src = (name) => (cu ? def.url[name] : `avatars/${def.id}-${name}.webp`);
+  const opt = (name) => (src(name) ? loadTex(src(name)).catch(() => null) : Promise.resolve(null));
   const [tOpen, tClosed, tStand, tTalk, ...tWk] = await Promise.all([
-    loadTex(`avatars/${def.id}-open.webp`), loadTex(`avatars/${def.id}-closed.webp`), opt('stand'), opt('talk'), opt('wk1'), opt('wk2'), opt('wk3'), opt('wk4'),
+    loadTex(src('open')), cu ? opt('closed') : loadTex(src('closed')), opt('stand'), opt('talk'), ...(cu ? [] : [opt('wk1'), opt('wk2'), opt('wk3'), opt('wk4')]),
   ]);
-  const four = tWk.every(Boolean); // 걸음 네 단계 그림이 다 있으면 그것을 쓰고, 없으면 예전 세 장으로 걷는다
-  const [tW1, tW2, tW3] = four ? [] : await Promise.all([opt('walk1'), opt('walk2'), opt('walk3')]);
-  const W = tOpen.image.width / tOpen.image.height;
+  const wf = cu && def.files.walk ? await (def.walkP || (def.walkP = walkFrames(def.files.walk).catch((e) => { console.warn('걷는 그림을 나누지 못했습니다', e); return null; }))) : null;
+  const four = cu ? !!wf : tWk.every(Boolean); // 걸음 네 단계 그림이 다 있으면 그것을 쓰고, 없으면 예전 세 장으로 걷는다
+  const [tW1, tW2, tW3] = four || cu ? [] : await Promise.all([opt('walk1'), opt('walk2'), opt('walk3')]);
+  const W = cu ? def.W : tOpen.image.width / tOpen.image.height;
+  const tfv = (k) => new THREE.Vector4(...((cu && def.tf[k]) || [1, 1, 0, 0]));
   const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthTest: false,
-    uniforms: { tOpen: { value: tOpen }, tClosed: { value: tClosed }, tTalk: { value: tTalk || tOpen }, tPose: { value: tOpen }, tHigh: { value: tOpen }, uBlink: { value: 0 }, uTalk: { value: 0 }, uPose: { value: new THREE.Vector2() }, uHigh: { value: new THREE.Vector2() }, uAlpha: { value: 1 }, uRot: { value: new THREE.Vector3() }, uLean: { value: new THREE.Vector2() }, uNeck: { value: 0.5 - def.neck }, uSplit: { value: 0.5 - def.split }, uHead: { value: new THREE.Vector2(def.hx, def.hw) }, uHeadHi: { value: def.hh || def.hw }, uBreath: { value: 0 }, uW: { value: W } } });
+    uniforms: { tOpen: { value: tOpen }, tClosed: { value: tClosed || tOpen }, tTalk: { value: tTalk || tOpen }, tPose: { value: tOpen }, tHigh: { value: tOpen },
+      uTfO: { value: tfv('open') }, uTfC: { value: tfv(tClosed ? 'closed' : 'open') }, uTfT: { value: tfv(tTalk ? 'talk' : 'open') }, uTfP: { value: tfv('open') }, uTfH: { value: tfv('open') }, uBlink: { value: 0 }, uTalk: { value: 0 }, uPose: { value: new THREE.Vector2() }, uHigh: { value: new THREE.Vector2() }, uAlpha: { value: 1 }, uRot: { value: new THREE.Vector3() }, uLean: { value: new THREE.Vector2() }, uNeck: { value: 0.5 - def.neck }, uSplit: { value: 0.5 - def.split }, uHead: { value: new THREE.Vector2(def.hx, def.hw) }, uHeadHi: { value: def.hh || def.hw }, uBreath: { value: 0 }, uW: { value: W } } });
   const body = new THREE.Mesh(new THREE.PlaneGeometry(W, 1, 24, 48), mat);
   body.position.y = 0.5;
   const shMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthTest: false });
@@ -244,7 +415,7 @@ async function makeAvatar(defId) {
   const root = new THREE.Group(); root.add(sh, body);
   // 든 팔의 팔뚝과 손은 따로 떼어 팔꿈치를 축으로 돌린다. 화면 왼쪽 팔(side -1)과 오른쪽 팔(side +1)
   const arms = [-1, 1].map((side) => {
-    const el = side < 0 ? def.al : def.ar; if (!el) return null;
+    const el = side < 0 ? def.al : def.ar; if (!el) return cu ? { side, el: null, g: null, k: 0, kh: 0, a: 1.55, v: 0, goal: 0 } : null; // 사진 아바타는 팔뚝 조각 없이 상태만 둔다
     const m = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, opacity: 0 });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(W, 1), m);
     mesh.position.set(-el[0], -el[1], 0);
@@ -256,7 +427,11 @@ async function makeAvatar(defId) {
   const tops = [-1, 1].map((side) => {
     const x0 = side < 0 ? -W / 2 : def.hx, x1 = side < 0 ? def.hx : W / 2;
     const geo = new THREE.PlaneGeometry(x1 - x0, HIGH_EXT), uv = geo.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setX(i, (lerp(x0, x1, uv.getX(i)) + W / 2) / W);
+    const th = cu && def.tf.high;
+    for (let i = 0; i < uv.count; i++) {
+      const ux = (lerp(x0, x1, uv.getX(i)) + W / 2) / W;
+      if (th) uv.setXY(i, ux * th[0] + th[2], (1 + HIGH_EXT * uv.getY(i)) * th[1] + th[3]); else uv.setX(i, ux); // 사진 아바타는 한 장짜리 그림의 윗부분을 그대로 읽는다
+    }
     const m = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, opacity: 0 });
     const mesh = new THREE.Mesh(geo, m); mesh.position.x = (x0 + x1) / 2; topR.add(mesh);
     return { m, mesh };
@@ -264,8 +439,16 @@ async function makeAvatar(defId) {
   let hasHigh = false;
   // 서 있는 그림과 걷는 그림은 발바닥이 바닥(y=0)에 닿게 놓는다
   const SH = def.sh || STAND_H; // 앉은 키를 1로 봤을 때 선 키 (머리 크기가 앉은 그림과 같아지게 맞춘 값)
-  const flat = (tx) => { if (!tx) return null; const m = new THREE.MeshBasicMaterial({ map: tx, transparent: true, depthTest: false }); const mesh = new THREE.Mesh(new THREE.PlaneGeometry(SH * tx.image.width / tx.image.height, SH), m); mesh.visible = false; root.add(mesh); return { m, mesh }; };
-  const stand = flat(tStand), walks = four ? tWk.map(flat) : tW1 && tW2 ? [flat(tW1), flat(tW2), flat(tW3)] : null;
+  // r: 그림 한 장 안에서 쓸 부분(사진 아바타). uv 범위, 선 키를 1로 본 폭·높이, 머리 기준 가로 치우침
+  const flat = (tx, r) => {
+    if (!tx || (cu && !r)) return null;
+    const m = new THREE.MeshBasicMaterial({ map: tx, transparent: true, depthTest: false });
+    const hh = SH * (r ? r.h : 1), geo = new THREE.PlaneGeometry(r ? SH * r.w : SH * tx.image.width / tx.image.height, hh);
+    if (r && r.uv) { const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, lerp(r.uv[0], r.uv[2], uv.getX(i)), lerp(r.uv[1], r.uv[3], uv.getY(i))); }
+    const mesh = new THREE.Mesh(geo, m); mesh.visible = false; root.add(mesh); return { m, mesh, hh, dx: r ? SH * (r.dx || 0) : 0 };
+  };
+  const stand = flat(tStand, cu ? def.stand : null);
+  const walks = cu ? (wf ? wf.map((q) => flat(q.tex, q.r)) : null) : four ? tWk.map((tx) => flat(tx)) : tW1 && tW2 ? [flat(tW1), flat(tW2), flat(tW3)] : null;
   // 걸음 순서(네 장): 발 딛기 → 체중 싣기 → 다리 모으기 → 밀어내기. 한 걸음마다 되풀이한다
   // 예전 그림(세 장): 한 발 내딛기 → 다리 모으기 → 반대 발 내딛기 → 다리 모으기
   const cycle = four ? [0, 1, 2, 3] : walks && walks[2] ? [0, 2, 1, 2] : [0, 1];
@@ -279,15 +462,19 @@ async function makeAvatar(defId) {
       // 손동작: 합장과 손 들기는 그림이 달라서, 바뀔 때는 먼저 기본 자세로 돌아갔다가 넘어간다
       const want = GEST[p.g] || null, hands = [p.hl, p.hr];
       const anyK = kPray > 0.01 || arms.some((x) => x && x.k > 0.01);
+      if (cu && want && poseName && want !== poseName && !anyK) poseName = null; // 사진 아바타는 손동작마다 그림을 새로 고른다
       let tPray = 0; const tArm = [0, 0];
       if (want && want !== poseName) {
         if (!anyK && !poseBusy) {
           poseBusy = true;
           const files = want === 'both' ? ['bothb', 'arml', 'armr'] : ['pray'];
-          const extra = want === 'both' && !hasHigh ? [opt('highb'), opt('hightop')] : [];
-          Promise.all([...files.map((f) => loadTex(`avatars/${def.id}-${f}.webp`)), ...extra]).then(([tb, tl, tr, th, tt]) => {
-            u.tPose.value = tb; [tl, tr].forEach((tx, i) => { if (tx && arms[i]) { arms[i].m.map = tx; arms[i].m.needsUpdate = true; } }); poseName = want;
-            if (th && tt) { u.tHigh.value = th; tops.forEach((tp) => { tp.m.map = tt; tp.m.needsUpdate = true; }); hasHigh = true; }
+          // 사진 아바타: 합장 그림 한 장, 손 들기는 머리 위로 뻗은 그림 한 장만 쓴다
+          const main = cu ? [want === 'pray' ? opt('pray') : Promise.resolve(null), null, null] : files.map((f) => loadTex(src(f)));
+          const extra = want === 'both' && !hasHigh ? (cu ? [opt('high'), opt('high')] : [opt('highb'), opt('hightop')]) : [];
+          Promise.all([...main, null, null].slice(0, 3).concat(extra)).then(([tb, tl, tr, th, tt]) => {
+            u.tPose.value = tb || tOpen; u.uTfP.value.copy(tfv(cu && tb ? 'pray' : 'open'));
+            [tl, tr].forEach((tx, i) => { if (tx && arms[i] && arms[i].m) { arms[i].m.map = tx; arms[i].m.needsUpdate = true; } }); poseName = want;
+            if (th && tt) { u.tHigh.value = th; u.uTfH.value.copy(tfv('high')); tops.forEach((tp) => { tp.m.map = tt; tp.m.needsUpdate = true; }); hasHigh = true; }
           }).catch(() => {}).finally(() => { poseBusy = false; });
         }
       } else if (want === 'pray') tPray = 1;
@@ -298,14 +485,15 @@ async function makeAvatar(defId) {
       arms.forEach((x, i) => {
         if (!x) return;
         x.k = ramp(x.k, tArm[i]);
-        const hi = hands[i] === HIGH;
+        const hi = hands[i] === HIGH || (cu && hands[i] != null); // 사진 아바타는 손을 들면 언제나 머리 위로 뻗는다
         if (hands[i] != null) x.goal = hi ? -0.12 : hands[i]; // 높이 들 때는 팔뚝을 먼저 곧게 세운다
         const on = poseName === 'both' && x.k > 0.001;
-        pw[i] = on ? clamp(x.k / 0.45, 0, 1) : 0;
+        pw[i] = on && !cu ? clamp(x.k / 0.45, 0, 1) : 0;
         // 팔뚝이 거의 다 올라온 뒤에 머리 위로 쭉 뻗은 그림으로 넘어간다
-        const toH = on && hi && hasHigh && x.k > 0.8 ? 1 : 0;
-        x.kh = clamp(x.kh + Math.sign(toH - x.kh) * dt * 4.5, 0, 1);
+        const toH = on && hi && hasHigh && x.k > (cu ? 0.05 : 0.8) ? 1 : 0;
+        x.kh = clamp(x.kh + Math.sign(toH - x.kh) * dt * (cu ? 3 : 4.5), 0, 1);
         const eh = on ? ease(x.kh) : 0; ph[i] = eh;
+        if (!x.g) return;
         // 팔뚝: 옆으로 내린 각도(1.55)에서 올라와 손 위치를 따라간다. 약한 스프링으로 살짝 출렁이게 한다
         const goal = on ? lerp(1.55, x.goal, ease(x.k)) : 1.55;
         for (let left = dt; left > 0; left -= 1 / 120) { const h = Math.min(left, 1 / 120); x.v += ((goal - x.a) * 130 - x.v * 15) * h; x.a += x.v * h; } // 화면이 느려도 튀지 않게 잘게 나눠 계산
@@ -352,13 +540,13 @@ async function makeAvatar(defId) {
         walks.forEach((wk, i) => {
           if (!wk) return;
           wk.mesh.visible = walk > 0.01 && i === f; wk.m.opacity = walk; wk.mesh.renderOrder = order + 1;
-          wk.mesh.scale.x = dir; wk.mesh.position.y = SH / 2 + bob;
+          wk.mesh.scale.x = dir; wk.mesh.position.y = wk.hh / 2 + bob; wk.mesh.position.x = wk.dx * dir;
         });
       }
     },
     dispose() {
       scene.remove(root); body.geometry.dispose(); mat.dispose(); sh.geometry.dispose(); shMat.dispose();
-      for (const x of arms) if (x) { x.mesh.geometry.dispose(); x.m.dispose(); }
+      for (const x of arms) if (x && x.mesh) { x.mesh.geometry.dispose(); x.m.dispose(); }
       for (const tp of tops) { tp.mesh.geometry.dispose(); tp.m.dispose(); }
       for (const f of [stand, ...(walks || [])]) if (f) { f.mesh.geometry.dispose(); f.m.dispose(); }
     },
@@ -665,18 +853,20 @@ function onHostData(conn, msg) {
   if (S.conns.get(id) === conn || msg.t === 'hello') seen.set(id, performance.now());
   if (msg.t === 'hello') {
     if (S.conns.size >= MAX_GUESTS) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 300); return; }
-    const m = { id, name: String(msg.name || '참가자').slice(0, 12), avatar: AVATARS.some((a) => a.id === msg.avatar) ? msg.avatar : AVATARS[0].id, host: false };
+    const m = { id, name: String(msg.name || '참가자').slice(0, 12), avatar: knownAvatar(msg.avatar) ? msg.avatar : AVATARS[0].id, host: false };
     // 같은 사람이 끊겼다 다시 붙은 경우: 자리는 그대로 두고 연결만 새것으로 바꾼다
     const old = S.conns.get(id), back = members.has(id);
     S.conns.set(id, conn);
     if (old && old !== conn) { try { old.close(); } catch (e) { /* 무시 */ } }
     S.calls.get(id)?.close(); S.calls.delete(id);
     conn.send({ t: 'room', you: id, bg: S.bg, awayOn: S.awayOn, members: back ? roster() : [...roster(), m] });
+    for (const cid of new Set(roster().map((x) => x.avatar).filter((a) => isCustomId(a) && a !== m.avatar))) sendCustom(conn, cid); // 지금 방에 있는 사진 아바타 그림을 새로 온 사람에게 보낸다
     if (!back) { addMember(m, true); cast({ t: 'join', m }, id); }
     if (S.mic) S.calls.set(id, S.peer.call(id, S.mic));
   } else if (!S.conns.has(id)) return;
   else if (msg.t === 'p' && Array.isArray(msg.k)) { const mem = members.get(id); if (mem) { applyPacket(mem, msg.k, false); mem.raw = msg.k; } }
-  else if (msg.t === 'avatar' && AVATARS.some((a) => a.id === msg.avatar)) { setAvatar(id, msg.avatar); cast({ t: 'avatar', id, avatar: msg.avatar }); }
+  else if (msg.t === 'avatar' && knownAvatar(msg.avatar)) { setAvatar(id, msg.avatar); cast({ t: 'avatar', id, avatar: msg.avatar }); }
+  else if (msg.t === 'cf' || msg.t === 'cd') { const got = recvCustom(msg); if (got) for (const [pid, c] of S.conns) if (pid !== id) sendCustom(c, got); } // 참가자가 보낸 사진 아바타 그림을 받아 다른 참가자에게 전한다
   else if (msg.t === 'away') { const v = !!msg.v && S.awayOn; setAway(id, v); cast({ t: 'away', id, v }, id); }
 }
 function clearMembers() {
@@ -741,12 +931,14 @@ function joinRoom(code) {
         if (!first) clearMembers();
         setBg(msg.bg);
         for (const m of msg.members || []) addMember(m, first && m.id === peer.id);
+        if (isCustomId(S.avatar)) sendCustom(from, S.avatar); // 내 사진 아바타 그림을 진행자에게 보낸다 (진행자가 다른 참가자에게 전한다)
         if (first) { joined = true; resolve(); } else { rejoinAt = performance.now(); if (S.away) from.send({ t: 'away', v: true }); say('진행자와 다시 연결됐습니다'); }
       }
       else if (!joined || from !== S.hostConn) return;
       else if (msg.t === 'join') addMember(msg.m, performance.now() - rejoinAt > 8000); // 다시 붙은 직후 한꺼번에 돌아오는 사람들은 걸어 들어오는 장면 없이 앉힌다
       else if (msg.t === 'leave') removeMember(msg.id);
       else if (msg.t === 'avatar') setAvatar(msg.id, msg.avatar);
+      else if (msg.t === 'cf' || msg.t === 'cd') recvCustom(msg);
       else if (msg.t === 'away') { if (msg.id !== S.myId) setAway(msg.id, !!msg.v); }
       else if (msg.t === 'bg') setBg(msg.bg);
       else if (msg.t === 'cfg') { S.awayOn = msg.awayOn !== false; if (!S.awayOn) { lastFace = performance.now(); iAmAway(false); } }
@@ -813,6 +1005,14 @@ function toBar() {
 }
 function avatarRow(row, onPick) {
   row.replaceChildren();
+  // 내 사진으로 만든 아바타(있으면)와 만들기 버튼을 맨 앞에 둔다
+  const mine = S.mine && CUSTOM.get(S.mine);
+  if (mine) {
+    const b = el('button', 'thumb av'); b.type = 'button'; b.title = mine.label; b.setAttribute('aria-label', mine.label); b.setAttribute('aria-pressed', String(mine.id === S.avatar));
+    b.style.backgroundImage = `url(${mine.url.open})`; b.addEventListener('click', () => onPick(mine.id)); row.append(b);
+  }
+  const add = el('button', 'thumb av add'); add.type = 'button'; add.setAttribute('aria-label', '내 사진으로 아바타 만들기'); add.append(el('b', null, '+'), el('span', null, mine ? '다시 만들기' : '내 사진으로'));
+  add.addEventListener('click', () => openMaker((id) => onPick(id))); row.append(add);
   for (const a of AVATARS) {
     const b = el('button', 'thumb av'); b.type = 'button'; b.title = a.label; b.setAttribute('aria-label', a.label); b.setAttribute('aria-pressed', String(a.id === S.avatar));
     b.style.backgroundImage = `url(avatars/thumb-${a.id}.webp)`;
@@ -820,6 +1020,103 @@ function avatarRow(row, onPick) {
     row.append(b);
   }
   row.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+/* ---------- 내 사진으로 아바타 만들기 ---------- */
+const MK = { busy: false, file: null, info: null, cancel: false };
+const MK_ERR = { not_configured: '아직 준비되지 않았습니다. 진행자가 서버 설정(OpenAI 키)을 마쳐야 합니다.', bad_code: '만들기 코드가 맞지 않습니다. 진행자에게 확인해 주세요.', bad_image: '사진을 읽지 못했습니다. 다른 사진으로 해 보세요.', opaque: '그림 배경이 투명하게 나오지 않았습니다. 다시 시도해 주세요.', forbidden: '이 사이트에서만 쓸 수 있습니다.' };
+async function avatarApi(body) {
+  const r = await fetch('api/avatar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j || !j.image) { const e = new Error((j && j.error) || `http${r.status}`); e.status = r.status; e.info = j; throw e; }
+  return j.image;
+}
+// 한 번 실패하면 잠시 쉬었다가 한 번 더 그린다 (설정·코드 문제는 다시 해도 같으므로 바로 알린다)
+async function drawStep(body) {
+  try { return await avatarApi(body); }
+  catch (e) { if ([401, 403, 503, 400].includes(e.status)) throw e; await new Promise((r) => setTimeout(r, e.status === 429 ? 20000 : 4000)); return avatarApi(body); }
+}
+async function photoData(file) {
+  const bmp = await createImageBitmap(file), f = Math.min(1, 1024 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * f); c.height = Math.round(bmp.height * f);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); if (bmp.close) bmp.close();
+  return c.toDataURL('image/jpeg', 0.88);
+}
+const toBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
+// 사진 한 장 → 그림 일곱 장 → 재서 등록. tell(문구)로 진행 상황을 알린다
+async function createCustom(file, code, tell) {
+  const photo = await photoData(file), out = {}; let done = 0;
+  const step = (n) => tell(`그리는 중 ${n}/7 · 3~5분쯤 걸립니다. 이 화면을 닫지 말아 주세요`);
+  step(1);
+  out.base = await drawStep({ step: 'base', photo, code });
+  done = 1; step(2);
+  const todo = ['stand', 'closed', 'talk', 'pray', 'high'], fail = [];
+  const worker = async () => { for (;;) { const k = todo.shift(); if (!k) return; try { out[k] = await drawStep({ step: k, base: out.base, code }); } catch (e) { if (k === 'stand' || [401, 503].includes(e.status)) throw e; fail.push(k); console.warn(k, e); } done++; step(Math.min(done + 1, 7)); } };
+  await Promise.all([worker(), worker(), worker()]); // 세 장씩 동시에
+  try { out.walk = await drawStep({ step: 'walk', base: out.base, stand: out.stand, code }); } catch (e) { fail.push('walk'); console.warn('walk', e); }
+  tell('마무리하는 중…');
+  const files = { open: await toBlob(out.base) };
+  for (const k of ['closed', 'talk', 'pray', 'high', 'stand', 'walk']) if (out[k]) files[k] = await toBlob(out[k]);
+  const p = await measureCustom(files);
+  const id = 'u' + Array.from(crypto.getRandomValues(new Uint8Array(8)), (v) => 'abcdefghijklmnopqrstuvwxyz0123456789'[v % 36]).join('');
+  if (!registerCustom(id, p, files)) throw new Error('opaque');
+  try { await kv('readwrite', (st) => st.put({ id, p, files: CUSTOM.get(id).files }, 'mine')); } catch (e) { console.warn('아바타를 기기에 저장하지 못했습니다', e); }
+  S.mine = id;
+  return { id, fail };
+}
+async function loadMine() {
+  try {
+    const v = await kv('readonly', (st) => st.get('mine'));
+    if (v && registerCustom(v.id, v.p, v.files)) { S.mine = v.id; return true; }
+  } catch (e) { console.warn(e); }
+  return false;
+}
+async function deleteMine() {
+  const id = S.mine; S.mine = null;
+  try { await kv('readwrite', (st) => st.delete('mine')); } catch (e) { console.warn(e); }
+  if (S.avatar === id) pickAvatar(AVATARS[0].id);
+}
+// after(id): 만든 뒤 할 일 (선택하고 목록 새로 그리기)
+async function openMaker(after) {
+  const box = $('#maker'); box.replaceChildren(); box.hidden = false;
+  const close = () => { if (MK.busy) return; box.hidden = true; box.replaceChildren(); };
+  const panel = el('div', 'panel');
+  panel.append(el('h2', null, '내 사진으로 아바타 만들기'));
+  panel.append(el('p', 'note', '정면 얼굴이 잘 보이는 본인 사진 한 장을 골라 주세요. 사진은 그림을 그리는 동안만 쓰이고(OpenAI로 전송) 서버에 저장되지 않습니다. 완성된 아바타는 이 기기에 보관됩니다.'));
+  const pick = el('div', 'row'), shot = el('button', 'chip', '사진 찍기'), album = el('button', 'chip', '앨범에서 고르기');
+  const inCam = el('input'), inAlb = el('input');
+  for (const [inp, cap] of [[inCam, true], [inAlb, false]]) { inp.type = 'file'; inp.accept = 'image/*'; inp.hidden = true; if (cap) inp.setAttribute('capture', 'user'); }
+  shot.type = album.type = 'button'; shot.addEventListener('click', () => inCam.click()); album.addEventListener('click', () => inAlb.click());
+  pick.append(shot, album, inCam, inAlb);
+  const prev = el('img', 'prev'); prev.alt = '고른 사진'; prev.hidden = true;
+  const codeWrap = el('div'), codeIn = el('input', 't'); codeIn.placeholder = '만들기 코드 (진행자에게 받은 코드)'; codeIn.autocomplete = 'off'; codeIn.setAttribute('aria-label', '만들기 코드'); codeWrap.hidden = true; codeWrap.append(codeIn);
+  const go = el('button', 'primary', '아바타 만들기'); go.type = 'button'; go.disabled = true;
+  const msg = el('p', 'note'); msg.setAttribute('role', 'status');
+  const err = el('p', 'err'); err.setAttribute('role', 'alert'); err.hidden = true;
+  const back = el('button', 'ghost', '닫기'); back.type = 'button'; back.addEventListener('click', close);
+  panel.append(pick, prev, codeWrap, go, msg, err);
+  if (S.mine) { const del = el('button', 'ghost', '지금 내 사진 아바타 지우기'); del.type = 'button'; del.addEventListener('click', async () => { if (MK.busy) return; await deleteMine(); close(); after(S.avatar); }); panel.append(del); }
+  panel.append(back); box.append(panel);
+  const ready = () => { go.disabled = MK.busy || !MK.file || !MK.info || !MK.info.configured; };
+  const chosen = (inp) => { const f = inp.files && inp.files[0]; if (!f) return; MK.file = f; prev.src = URL.createObjectURL(f); prev.hidden = false; err.hidden = true; ready(); };
+  inCam.addEventListener('change', () => chosen(inCam)); inAlb.addEventListener('change', () => chosen(inAlb));
+  MK.file = null; MK.info = null;
+  try { const r = await fetch('api/avatar'); MK.info = r.ok ? await r.json() : { configured: false }; } catch (e) { MK.info = { configured: false }; }
+  if (!MK.info.configured) { err.textContent = MK_ERR.not_configured; err.hidden = false; }
+  codeWrap.hidden = !MK.info.needCode; ready();
+  go.addEventListener('click', async () => {
+    if (MK.busy || !MK.file) return;
+    MK.busy = true; ready(); err.hidden = true; back.disabled = true; shot.disabled = album.disabled = true;
+    try {
+      const { id, fail } = await createCustom(MK.file, codeIn.value.trim(), (t) => { msg.textContent = t; });
+      MK.busy = false; close(); after(id);
+      say(fail.length ? '아바타를 만들었습니다 · 일부 동작 그림은 빠졌습니다' : '아바타를 만들었습니다');
+    } catch (e) {
+      console.warn(e); MK.busy = false; msg.textContent = '';
+      const info = e.info || {}, key = info.error || e.message;
+      err.textContent = MK_ERR[key] || (e.status === 429 ? '지금 요청이 많습니다. 잠시 뒤 다시 시도해 주세요.' : key === 'openai' ? `그림을 만들지 못했습니다. ${/moderation|safety/i.test(`${info.code} ${info.message}`) ? '이 사진으로는 만들 수 없다고 합니다. 다른 사진으로 해 보세요.' : `(${info.code || info.status || '오류'})`}` : '아바타를 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
+      err.hidden = false; back.disabled = false; shot.disabled = album.disabled = false; ready();
+    }
+  });
 }
 function openSheet(kind) {
   const sh = $('#sheet'); sh.replaceChildren(); sh.hidden = false;
@@ -854,7 +1151,8 @@ function pickAvatar(id) {
   S.avatar = id; try { localStorage.setItem('medclass-avatar', id); } catch (e) { /* 무시 */ }
   if (!S.myId) return;
   setAvatar(S.myId, id);
-  if (S.role === 'host') cast({ t: 'avatar', id: S.myId, avatar: id }); else if (S.hostConn?.open) S.hostConn.send({ t: 'avatar', avatar: id });
+  if (S.role === 'host') { if (isCustomId(id)) for (const c of S.conns.values()) sendCustom(c, id); cast({ t: 'avatar', id: S.myId, avatar: id }); }
+  else if (S.hostConn?.open) { if (isCustomId(id)) sendCustom(S.hostConn, id); S.hostConn.send({ t: 'avatar', avatar: id }); }
 }
 async function startMic() {
   try {
@@ -1010,8 +1308,9 @@ function tick() {
 }
 
 /* ---------- 시작 ---------- */
-window.__cls = { S, members, addMember, removeMember, setAway, setAvatar, setMyPacket, enc };
+window.__cls = { S, members, addMember, removeMember, setAway, setAvatar, setMyPacket, enc, CUSTOM, createCustom, pickAvatar };
 try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; const av = localStorage.getItem('medclass-avatar'); if (AVATARS.some((a) => a.id === av)) S.avatar = av; } catch (e) { /* 무시 */ }
+loadMine().then((ok) => { if (!ok) return; try { if (localStorage.getItem('medclass-avatar') === S.mine && !S.myId) S.avatar = S.mine; } catch (e) { /* 무시 */ } avatarRow($('#lobbyAv'), lobbyPick); });
 const lobbyPick = (id) => { pickAvatar(id); avatarRow($('#lobbyAv'), lobbyPick); };
 avatarRow($('#lobbyAv'), lobbyPick);
 const preset = new URLSearchParams(location.search).get('room');
