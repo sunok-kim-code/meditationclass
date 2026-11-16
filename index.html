@@ -10,7 +10,7 @@ html,body{margin:0;height:100%;background:#0d1110;color:#f3f1ea;font-family:-app
 button,input{font:inherit;color:inherit}
 button:focus-visible,input:focus-visible{outline:2px solid #fff;outline-offset:2px}
 [hidden]{display:none!important}
-#bg{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
+#bg{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;object-position:center bottom}
 #shade{position:fixed;inset:0;background:linear-gradient(to bottom,rgba(13,17,16,.25),rgba(13,17,16,0) 22%,rgba(13,17,16,0) 55%,rgba(13,17,16,.7))}
 #gl{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
 
@@ -36,7 +36,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 .pill{padding:7px 12px;border-radius:999px;background:rgba(13,17,16,.62);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:12.5px;line-height:1.3;white-space:nowrap}
 #status{white-space:normal;margin-left:auto;text-align:right;max-width:58%}
 #status.bad{background:rgba(120,30,24,.85)}
-#hostSlot{flex:1.25;min-height:0;position:relative}
+#hostSlot{flex:2.1;min-height:0;position:relative}
 #grid{flex:1;min-height:0;display:grid;gap:4px;grid-auto-rows:1fr}
 .slot{position:relative;min-width:0;min-height:0}
 .slot .nm{position:absolute;left:50%;bottom:2px;transform:translateX(-50%);max-width:96%;padding:3px 9px;border-radius:999px;background:rgba(13,17,16,.6);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -124,8 +124,8 @@ const AVATARS = [
   { id: 'a', label: '캐릭터 A', url: 'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@v0.6.11/packages/three-vrm/examples/models/three-vrm-girl.vrm' },
   { id: 'b', label: '캐릭터 B', url: 'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@dev/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm' },
 ];
-const BGS = [{ id: 28, label: '숲 계곡' }, { id: 16, label: '호수' }, { id: 10, label: '숲과 바다' }, { id: 1043, label: '산과 강' }];
-const bgUrl = (id, w, h) => `https://picsum.photos/id/${id}/${w}/${h}`;
+const BGS = [{ id: 'center', label: '명상 센터' }, { id: 'temple', label: '산사' }, { id: 'beach', label: '바닷가' }, { id: 'mountain', label: '산' }];
+const bgUrl = (id, thumb) => `bg/${thumb ? 'thumb-' : ''}${id}.jpg`;
 const KEYS = ['eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen', 'mouthFunnel', 'mouthPucker', 'mouthSmileLeft', 'mouthSmileRight'];
 const MAX_GUESTS = 12, SEND_MS = 85, PREFIX = 'sunmedclass-';
 const $ = (s) => document.querySelector(s);
@@ -335,9 +335,9 @@ const micConstraints = () => ({ audio: S.bowl ? { echoCancellation: false, noise
 function openHost(tries = 0) {
   return new Promise((resolve, reject) => {
     const code = newCode(), peer = new Peer(hostPeerId(code));
-    peer.on('open', (id) => { S.peer = peer; S.code = code; S.myId = id; resolve(); });
+    peer.on('open', (id) => { if (S.peer === peer) { hostStatus(); return; } S.peer = peer; S.code = code; S.myId = id; resolve(); });
     peer.on('error', (err) => {
-      if (S.peer === peer) { if (err.type === 'network' || err.type === 'disconnected') say('연결이 불안정합니다. 다시 연결하는 중…', true); return; }
+      if (S.peer === peer) { if (err.type === 'network' || err.type === 'disconnected') say('연결 서버에 다시 붙는 중… 수업은 계속됩니다'); return; }
       peer.destroy();
       if (err.type === 'unavailable-id' && tries < 3) openHost(tries + 1).then(resolve, reject); else reject(err);
     });
@@ -368,19 +368,20 @@ function joinRoom(code) {
     const fail = (m) => { if (done) return; done = true; peer.destroy(); reject(new Error(m)); };
     const timer = setTimeout(() => fail('연결 시간이 초과됐습니다. 네트워크를 확인하고 다시 시도해 주세요.'), 20000);
     peer.on('error', (err) => {
-      if (done) { if (!S.ended && (err.type === 'network' || err.type === 'disconnected')) say('연결이 불안정합니다. 다시 연결하는 중…', true); return; }
+      if (done) { if (!S.ended && (err.type === 'network' || err.type === 'disconnected')) say('연결 서버에 다시 붙는 중… 수업은 계속됩니다'); return; }
       clearTimeout(timer);
       fail(err.type === 'peer-unavailable' ? '수업을 찾지 못했습니다. 코드를 확인하거나, 진행자가 수업을 열었는지 확인해 주세요.' : '연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.');
     });
     peer.on('disconnected', () => { if (!S.ended) peer.reconnect(); });
     peer.on('call', (call) => { call.answer(); call.on('stream', playHost); });
     peer.on('open', (id) => {
+      if (done) { say($('#hostAudio').srcObject ? '진행자 목소리 연결됨' : '진행자 목소리를 기다리는 중…'); return; }
       const conn = peer.connect(hostPeerId(code), { reliable: true });
       conn.on('open', () => conn.send({ t: 'hello', name: S.name, avatar: S.avatar }));
       conn.on('data', (msg) => {
         if (!msg || typeof msg !== 'object') return;
         if (msg.t === 'full') { clearTimeout(timer); fail('수업 정원이 가득 찼습니다.'); }
-        else if (msg.t === 'room') { clearTimeout(timer); done = true; S.peer = peer; S.hostConn = conn; S.code = code; S.myId = id; S.bg = msg.bg; for (const m of msg.members || []) addMember(m); resolve(); }
+        else if (msg.t === 'room') { clearTimeout(timer); done = true; S.peer = peer; S.hostConn = conn; S.code = code; S.myId = id; setBg(msg.bg); for (const m of msg.members || []) addMember(m); resolve(); }
         else if (msg.t === 'join') addMember(msg.m);
         else if (msg.t === 'leave') removeMember(msg.id);
         else if (msg.t === 'avatar') setAvatar(msg.id, msg.avatar);
@@ -414,9 +415,10 @@ function netTick(now) {
 
 /* ---------- 화면 ---------- */
 function setBg(id) {
+  if (!BGS.some((g) => g.id === id)) id = BGS[0].id;
+  if (S.bg === id && $('#bg').getAttribute('src')) return;
   S.bg = id;
-  const [w, h] = innerHeight > innerWidth ? [1080, 1920] : [1920, 1080];
-  $('#bg').src = bgUrl(id, w, h);
+  $('#bg').src = bgUrl(id);
 }
 function toBar() {
   const bar = $('#bar'); bar.replaceChildren();
@@ -438,7 +440,7 @@ function openSheet(kind) {
   } else {
     sh.append(el('h2', null, '배경 (모두에게 바뀝니다)'));
     const row = el('div', 'row');
-    for (const g of BGS) { const b = el('button', 'thumb'); b.type = 'button'; b.setAttribute('aria-label', g.label); b.setAttribute('aria-pressed', String(g.id === S.bg)); b.style.backgroundImage = `url(${bgUrl(g.id, 120, 120)})`; b.addEventListener('click', () => { setBg(g.id); cast({ t: 'bg', bg: g.id }); openSheet('host'); }); row.append(b); }
+    for (const g of BGS) { const b = el('button', 'thumb'); b.type = 'button'; b.setAttribute('aria-label', g.label); b.setAttribute('aria-pressed', String(g.id === S.bg)); b.style.backgroundImage = `url(${bgUrl(g.id, true)})`; b.addEventListener('click', () => { setBg(g.id); cast({ t: 'bg', bg: g.id }); openSheet('host'); }); row.append(b); }
     sh.append(row, el('h2', null, '소리'));
     const row2 = el('div', 'row'), bowl = el('button', 'chip', '싱잉볼 모드 (잡음 제거 끔)'); bowl.type = 'button'; bowl.setAttribute('aria-pressed', String(S.bowl));
     bowl.addEventListener('click', async () => { S.bowl = !S.bowl; await startMic(); openSheet('host'); });
@@ -534,7 +536,7 @@ addEventListener('pagehide', () => { if (S.role === 'host' && !S.ended) cast({ t
 
 /* ---------- 루프 ---------- */
 function resize() { renderer.setSize(innerWidth, innerHeight, false); }
-addEventListener('resize', () => { resize(); if (S.peer) setBg(S.bg); });
+addEventListener('resize', resize);
 const clock = new THREE.Clock();
 function tick() {
   requestAnimationFrame(tick);
@@ -555,8 +557,9 @@ function tick() {
     renderer.setViewport(r.left, y, r.width, r.height); renderer.setScissor(r.left, y, r.width, r.height);
     camera.aspect = r.width / r.height;
     const dist = Math.max(inst.halfH / tan, inst.halfW / (tan * camera.aspect)) * 1.04;
-    camera.position.set(inst.center.x, inst.center.y + dist * 0.12, inst.center.z + dist);
-    camera.lookAt(inst.center); camera.updateProjectionMatrix();
+    const up = Math.max(0, dist * tan - inst.halfH * 1.04); // 가로 폭에 맞춰질 때는 슬롯 바닥에 붙여 앉힌다
+    camera.position.set(inst.center.x, inst.center.y + up + dist * 0.12, inst.center.z + dist);
+    camera.lookAt(inst.center.x, inst.center.y + up, inst.center.z); camera.updateProjectionMatrix();
     inst.root.visible = true; renderer.render(scene, camera); inst.root.visible = false;
   }
 }
