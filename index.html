@@ -36,13 +36,12 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 .pill{padding:7px 12px;border-radius:999px;background:rgba(13,17,16,.62);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:12.5px;line-height:1.3;white-space:nowrap}
 #status{white-space:normal;margin-left:auto;text-align:right;max-width:58%}
 #status.bad{background:rgba(120,30,24,.85)}
-#hostSlot{flex:2.1;min-height:0;position:relative}
-#grid{flex:1;min-height:0;display:grid;gap:4px;grid-auto-rows:1fr}
-.slot{position:relative;min-width:0;min-height:0}
-.slot .nm{position:absolute;left:50%;bottom:2px;transform:translateX(-50%);max-width:96%;padding:3px 9px;border-radius:999px;background:rgba(13,17,16,.6);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#hostSlot .nm{font-size:13px;padding:5px 12px}
-.slot .ld{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#d6dbd3}
-#empty{align-self:center;justify-self:center;text-align:center;font-size:13px;line-height:1.6;color:#e6e9e2;padding:10px 14px;border-radius:14px;background:rgba(13,17,16,.5)}
+#stage{flex:1;min-height:0}
+.slot{position:fixed;pointer-events:none}
+.slot .nm{position:absolute;left:50%;top:100%;transform:translate(-50%,-70%);max-width:130%;padding:2px 8px;border-radius:999px;background:rgba(13,17,16,.55);font-size:11px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot.host .nm{font-size:12.5px;padding:3px 11px}
+.slot .ld{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;color:#d6dbd3}
+#empty{position:fixed;left:50%;transform:translateX(-50%);width:max-content;max-width:86%;text-align:center;white-space:pre-line;font-size:13px;line-height:1.6;color:#e6e9e2;padding:10px 14px;border-radius:14px;background:rgba(13,17,16,.5)}
 #bar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding-top:8px}
 .btn{min-height:44px;padding:0 15px;border-radius:999px;border:1px solid rgba(255,255,255,.28);background:rgba(13,17,16,.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:14px}
 .btn[aria-pressed="true"]{background:#e9e2cf;color:#17201b;border-color:#e9e2cf;font-weight:600}
@@ -82,8 +81,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
     <span class="pill" id="countPill"></span>
     <span class="pill" id="status" role="status"></span>
   </div>
-  <div id="hostSlot" class="slot"></div>
-  <div id="grid"></div>
+  <div id="stage"></div>
   <div id="bar"></div>
 </div>
 
@@ -130,21 +128,27 @@ const AVATARS = [
   { id: 'bear', label: '곰', neck: 0.318 },
   { id: 'cat', label: '고양이', neck: 0.366 },
 ];
-const BGS = [{ id: 'center', label: '명상 센터' }, { id: 'temple', label: '산사' }, { id: 'bamboo', label: '대나무 숲' }, { id: 'beach', label: '바닷가' }, { id: 'mountain', label: '산' }, { id: 'night', label: '밤하늘' }];
+// floor: 배경 그림에서 바닥이 시작되는 높이(위에서부터의 비율)
+const BGS = [
+  { id: 'center', label: '명상 센터', floor: 0.575 }, { id: 'temple', label: '산사', floor: 0.595 }, { id: 'bamboo', label: '대나무 숲', floor: 0.585 },
+  { id: 'beach', label: '바닷가', floor: 0.56 }, { id: 'mountain', label: '산', floor: 0.545 }, { id: 'night', label: '밤하늘', floor: 0.605 },
+];
 const bgUrl = (id, thumb) => `bg/${thumb ? 'thumb-' : ''}${id}.jpg`;
 const KEYS = ['eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen', 'mouthFunnel', 'mouthPucker', 'mouthSmileLeft', 'mouthSmileRight'];
 const MAX_GUESTS = 12, SEND_MS = 85, PREFIX = 'sunmedclass-';
+const AWAY_MS = 6000, WALK_S = 2.4, SIT_S = 0.8, STAND_H = 1.72;
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp;
+const ease = (k) => k * k * (3 - 2 * k);
 
 /* ---------- 그리기 ---------- */
 const canvas = $('#gl');
 const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.setScissorTest(true);
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(24, 1, 0.05, 30);
+const camera = new THREE.OrthographicCamera(0, 1, 1, 0, -10, 10); // 화면 픽셀 좌표 그대로 (y는 위쪽이 +)
 const texLoader = new THREE.TextureLoader();
 const texCache = new Map();
 const loadTex = (url) => {
@@ -159,7 +163,7 @@ const shadowTex = (() => {
   return new THREE.CanvasTexture(c);
 })();
 const VERT = `
-uniform vec3 uRot; uniform float uNeck; uniform float uBreath; uniform float uW;
+uniform vec3 uRot; uniform vec2 uLean; uniform float uNeck; uniform float uBreath; uniform float uW;
 varying vec2 vUv;
 void main() {
   vUv = uv;
@@ -167,6 +171,7 @@ void main() {
   float torso = smoothstep(-0.32, 0.05, p.y);
   p.y += uBreath * torso * 0.006;
   p.x *= 1.0 + uBreath * torso * 0.004;
+  // 고개: 목 위쪽만 휜다
   float w = smoothstep(uNeck - 0.035, uNeck + 0.05, position.y);
   vec2 q = p - vec2(0.0, uNeck);
   float c = cos(uRot.z * w), s = sin(uRot.z * w);
@@ -174,54 +179,89 @@ void main() {
   q.x = q.x * (1.0 - 0.10 * abs(uRot.y) * w) + uRot.y * 0.085 * uW * w;
   q.y = q.y * (1.0 - 0.16 * uRot.x * w) - uRot.x * 0.012 * w;
   p = q + vec2(0.0, uNeck);
+  // 몸: 엉덩이를 축으로 상체가 기운다
+  float wl = smoothstep(-0.36, 0.12, position.y);
+  vec2 hip = vec2(0.0, -0.27);
+  vec2 r = p - hip;
+  float a = -uLean.x * 0.24 * wl;
+  float ca = cos(a), sa = sin(a);
+  r = vec2(ca * r.x - sa * r.y, sa * r.x + ca * r.y);
+  r.y *= 1.0 - 0.07 * uLean.y * wl;
+  p = r + hip;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 0.0, 1.0);
 }`;
 const FRAG = `
-uniform sampler2D tOpen; uniform sampler2D tClosed; uniform float uBlink;
+uniform sampler2D tOpen; uniform sampler2D tClosed; uniform float uBlink; uniform float uAlpha;
 varying vec2 vUv;
 void main() {
   vec4 a = texture2D(tOpen, vUv), b = texture2D(tClosed, vUv);
   gl_FragColor = mix(a, b, uBlink);
+  gl_FragColor.a *= uAlpha;
   if (gl_FragColor.a < 0.01) discard;
   #include <colorspace_fragment>
 }`;
 
-// 앉은 자세로 그려진 2D 캐릭터. 목 위쪽을 고개 움직임에 맞춰 휘고, 눈 뜬/감은 그림을 섞는다.
+// 앉은 그림(고개·몸 움직임, 눈 뜬/감은 그림 혼합) + 서 있는 그림(걸어 들어오고 나갈 때)
 async function makeAvatar(defId) {
   const def = AVATARS.find((a) => a.id === defId) || AVATARS[0];
-  const [tOpen, tClosed] = await Promise.all([loadTex(`avatars/${def.id}-open.webp`), loadTex(`avatars/${def.id}-closed.webp`)]);
-  const W = tOpen.image.width / tOpen.image.height, neck = 0.5 - def.neck;
+  const [tOpen, tClosed, tStand] = await Promise.all([
+    loadTex(`avatars/${def.id}-open.webp`), loadTex(`avatars/${def.id}-closed.webp`),
+    loadTex(`avatars/${def.id}-stand.webp`).catch(() => null),
+  ]);
+  const W = tOpen.image.width / tOpen.image.height;
   const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthTest: false,
-    uniforms: { tOpen: { value: tOpen }, tClosed: { value: tClosed }, uBlink: { value: 0 }, uRot: { value: new THREE.Vector3() }, uNeck: { value: neck }, uBreath: { value: 0 }, uW: { value: W } } });
+    uniforms: { tOpen: { value: tOpen }, tClosed: { value: tClosed }, uBlink: { value: 0 }, uAlpha: { value: 1 }, uRot: { value: new THREE.Vector3() }, uLean: { value: new THREE.Vector2() }, uNeck: { value: 0.5 - def.neck }, uBreath: { value: 0 }, uW: { value: W } } });
   const body = new THREE.Mesh(new THREE.PlaneGeometry(W, 1, 24, 48), mat);
-  body.renderOrder = 1;
-  const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthTest: false }));
-  sh.position.set(0, -0.47, 0); sh.scale.set(W * 1.15, 0.12, 1);
-  const root = new THREE.Group(); root.add(sh, body); root.visible = false;
-  let blink = 0;
+  body.position.y = 0.5;
+  const shMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthTest: false });
+  const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shMat);
+  sh.position.y = 0.035; sh.scale.set(W * 1.15, 0.13, 1);
+  let stand = null, stMat = null;
+  if (tStand) {
+    stMat = new THREE.MeshBasicMaterial({ map: tStand, transparent: true, depthTest: false });
+    stand = new THREE.Mesh(new THREE.PlaneGeometry(STAND_H * tStand.image.width / tStand.image.height, STAND_H), stMat);
+    stand.visible = false;
+  }
+  const root = new THREE.Group(); root.add(sh, body); if (stand) root.add(stand);
+  root.visible = false;
   return {
-    defId: def.id, root, center: new THREE.Vector3(0, 0, 0), halfH: 0.52, halfW: W / 2 + 0.02,
-    update(p, dt, t) {
-      mat.uniforms.uRot.value.set(p.euler.x, p.euler.y, p.euler.z);
-      mat.uniforms.uBreath.value = Math.sin(t * 0.9 + p.phase);
-      const b = Math.max(p.blend.eyeBlinkLeft || 0, p.blend.eyeBlinkRight || 0);
-      blink = THREE.MathUtils.clamp((b - 0.25) / 0.35, 0, 1);
-      mat.uniforms.uBlink.value = blink;
+    defId: def.id, root,
+    // seat: 앉은 그림의 불투명도(0~1), up: 서 있는 그림의 불투명도, squat: 앉는 중 정도(0 선 자세 ~ 1 다 앉음), step: 걸음 위상
+    draw(p, t, order, seat, up, squat, step) {
+      const u = mat.uniforms;
+      u.uRot.value.set(p.euler.x, p.euler.y, p.euler.z);
+      u.uLean.value.set(p.lean.x, p.lean.y);
+      u.uBreath.value = Math.sin(t * 0.9 + p.phase);
+      u.uBlink.value = clamp((Math.max(p.blend.eyeBlinkLeft || 0, p.blend.eyeBlinkRight || 0) - 0.25) / 0.35, 0, 1);
+      u.uAlpha.value = seat; body.visible = seat > 0.01;
+      body.position.y = 0.5 + (1 - squat) * 0.16;
+      shMat.opacity = Math.max(seat, up); sh.visible = shMat.opacity > 0.01;
+      sh.renderOrder = order; body.renderOrder = order + 1;
+      if (stand) {
+        stand.visible = up > 0.01; stMat.opacity = up; stand.renderOrder = order + 1;
+        const sy = 1 - 0.36 * squat;
+        stand.scale.set(1 + 0.05 * squat, sy, 1);
+        stand.position.y = (STAND_H * sy) / 2 + Math.abs(Math.sin(step)) * 0.03;
+        stand.rotation.z = Math.sin(step) * 0.035;
+      }
     },
-    dispose() { scene.remove(root); body.geometry.dispose(); mat.dispose(); sh.geometry.dispose(); sh.material.dispose(); },
+    dispose() { scene.remove(root); body.geometry.dispose(); mat.dispose(); sh.geometry.dispose(); shMat.dispose(); if (stand) { stand.geometry.dispose(); stMat.dispose(); } },
   };
 }
 
 /* ---------- 상태 ---------- */
-const S = { role: null, code: '', myId: null, name: '', avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)].id, bg: BGS[0].id, peer: null, hostConn: null, conns: new Map(), calls: new Map(), mic: null, micOn: true, bowl: false, camOn: false, ended: false };
-const members = new Map(); // id -> { id, name, avatar, host, slot, inst, token, pose, target, lastSeen }
+const S = { role: null, code: '', myId: null, name: '', avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)].id, bg: BGS[0].id, peer: null, hostConn: null, conns: new Map(), calls: new Map(), mic: null, micOn: true, bowl: false, camOn: false, away: false, ended: false };
+const members = new Map(); // id -> { id, name, avatar, host, away, slot, inst, st, t0, seat, cur, pose, target, lastSeen }
+let order = [];            // 자리 순서(진행자 먼저)
+const ghosts = [];         // 나간 뒤 걸어 나가는 중인 사람
 const statusEl = $('#status');
 const say = (t, bad) => { statusEl.textContent = t; statusEl.classList.toggle('bad', !!bad); };
 
-function newPose() { return { blend: {}, quat: new THREE.Quaternion(), euler: new THREE.Euler(), phase: Math.random() * 6 }; }
-function addMember(m) {
+function newPose() { return { blend: {}, quat: new THREE.Quaternion(), euler: new THREE.Euler(), lean: new THREE.Vector2(), phase: Math.random() * 6 }; }
+// walkIn: 걸어 들어와 앉는 장면을 보여줄지 (이미 앉아 있던 사람은 false)
+function addMember(m, walkIn) {
   if (members.has(m.id)) return members.get(m.id);
-  const mem = { id: m.id, name: m.name, avatar: m.avatar, host: !!m.host, slot: null, inst: null, token: 0, pose: newPose(), target: { blend: {}, quat: new THREE.Quaternion() }, lastSeen: 0 };
+  const mem = { id: m.id, name: m.name, avatar: m.avatar, host: !!m.host, away: !!m.away, slot: null, inst: null, token: 0, st: m.away ? 'gone' : walkIn ? 'wait' : 'seated', t0: 0, seat: null, cur: null, pose: newPose(), target: { blend: {}, quat: new THREE.Quaternion(), lean: new THREE.Vector2() }, lastSeen: 0 };
   members.set(mem.id, mem);
   loadInst(mem);
   layout();
@@ -229,67 +269,120 @@ function addMember(m) {
 }
 function removeMember(id) {
   const mem = members.get(id); if (!mem) return;
-  mem.token++; if (mem.inst) mem.inst.dispose();
   members.delete(id);
+  if (mem.inst && mem.cur && mem.st !== 'gone' && !S.ended) { mem.slot = null; mem.leavingForGood = true; startLeave(mem); ghosts.push(mem); }
+  else { mem.token++; if (mem.inst) mem.inst.dispose(); }
   layout();
 }
 async function loadInst(mem) {
   const token = ++mem.token, want = mem.avatar;
   try {
     const inst = await makeAvatar(want);
-    if (mem.token !== token || !members.has(mem.id)) { inst.dispose(); return; }
+    if (mem.token !== token || (!members.has(mem.id) && !ghosts.includes(mem))) { inst.dispose(); return; }
     if (mem.inst) mem.inst.dispose();
     mem.inst = inst; scene.add(inst.root);
+    if (mem.st === 'wait') startEnter(mem);
     if (mem.slot) mem.slot.querySelector('.ld')?.remove();
   } catch (err) {
     console.error(err);
-    if (mem.slot && mem.token === token) { const l = mem.slot.querySelector('.ld'); if (l) l.textContent = '아바타를 불러오지 못했습니다'; }
+    if (mem.slot && mem.token === token) { const l = mem.slot.querySelector('.ld'); if (l) l.textContent = '불러오지 못했습니다'; }
   }
 }
-function setAvatar(id, avatar) { const mem = members.get(id); if (!mem || mem.avatar === avatar) return; mem.avatar = avatar; if (mem.slot && !mem.slot.querySelector('.ld')) mem.slot.append(el('div', 'ld', '바꾸는 중…')); loadInst(mem).then(() => mem.slot?.querySelector('.ld')?.remove()); }
-
-function layout() {
-  const hostSlot = $('#hostSlot'), grid = $('#grid');
-  const host = [...members.values()].find((m) => m.host);
-  const guests = [...members.values()].filter((m) => !m.host);
-  const fill = (slot, mem, label) => {
-    slot.replaceChildren();
-    if (!mem.inst) slot.append(el('div', 'ld', '아바타 불러오는 중…'));
-    slot.append(el('div', 'nm', label));
-    mem.slot = slot;
-  };
-  if (host) fill(hostSlot, host, `진행자 · ${host.name}${host.id === S.myId ? ' (나)' : ''}`); else hostSlot.replaceChildren();
-  grid.replaceChildren();
-  const n = guests.length, cols = n <= 3 ? Math.max(n, 1) : n <= 8 ? 4 : 5;
-  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-  if (!n) grid.append(Object.assign(el('div', null, S.role === 'host' ? '아직 참가자가 없습니다.\n코드나 초대 링크를 보내 주세요.' : ''), { id: 'empty', style: 'white-space:pre-line' + (S.role === 'host' ? '' : ';display:none') }));
-  guests.sort((a, b) => (a.id === S.myId ? -1 : b.id === S.myId ? 1 : 0));
-  for (const g of guests) { const slot = el('div', 'slot'); fill(slot, g, g.id === S.myId ? `${g.name} (나)` : g.name); grid.append(slot); }
-  $('#countPill').textContent = `${members.size}명`;
+function setAvatar(id, avatar) { const mem = members.get(id); if (!mem || mem.avatar === avatar) return; mem.avatar = avatar; loadInst(mem); }
+function startEnter(mem) { mem.st = 'entering'; mem.t0 = performance.now(); label(mem); }
+function startLeave(mem) { if (mem.st === 'gone' || mem.st === 'leaving') return; mem.st = mem.st === 'seated' ? 'leaving' : 'gone'; mem.t0 = performance.now(); label(mem); }
+function setAway(id, v) {
+  const mem = members.get(id); if (!mem || mem.away === !!v) return;
+  mem.away = !!v;
+  if (v) startLeave(mem); else if (mem.inst) startEnter(mem); else mem.st = 'wait';
+  label(mem);
+}
+function label(mem) {
+  if (!mem.slot) return;
+  const nm = mem.slot.querySelector('.nm'); if (!nm) return;
+  const base = mem.host ? `진행자 · ${mem.name}` : mem.name;
+  nm.textContent = base + (mem.id === S.myId ? ' (나)' : '') + (mem.away ? ' · 자리 비움' : '');
+  nm.style.opacity = mem.away ? '0.75' : mem.st === 'entering' || mem.st === 'wait' || mem.st === 'leaving' ? '0' : '1';
 }
 
-/* ---------- 표정 데이터 ---------- */
-const enc = (blend, e) => [[+e.x.toFixed(3), +e.y.toFixed(3), +e.z.toFixed(3)], KEYS.map((k) => Math.round((blend[k] || 0) * 100))];
+// 진행자는 가운데 뒤쪽, 참가자는 그 앞에 반원으로 둘러앉는다. 앞쪽일수록 크게 그린다.
+function layout() {
+  const stage = $('#stage'); stage.replaceChildren();
+  const host = [...members.values()].find((m) => m.host);
+  const guests = [...members.values()].filter((m) => !m.host);
+  const mk = (mem, cls) => {
+    const slot = el('div', 'slot' + (cls ? ' ' + cls : ''));
+    if (!mem.inst) slot.append(el('div', 'ld', '불러오는 중…'));
+    slot.append(el('div', 'nm'));
+    mem.slot = slot; stage.append(slot); label(mem);
+  };
+  if (host) mk(host, 'host');
+  const me = guests.findIndex((g) => g.id === S.myId); // 내 자리는 반원의 맨 앞 가운데
+  if (me >= 0) { const [m] = guests.splice(me, 1); guests.splice(Math.floor(guests.length / 2), 0, m); }
+  for (const g of guests) mk(g);
+  if (!guests.length && S.role === 'host') stage.append(Object.assign(el('div', null, '아직 참가자가 없습니다.\n코드나 초대 링크를 보내 주세요.'), { id: 'empty' }));
+  order = [host, ...guests].filter(Boolean);
+  $('#countPill').textContent = `${members.size}명`;
+  place();
+}
+// 배경 그림의 바닥선이 화면 어디에 오는지 (그림은 아래쪽에 맞춰 화면을 가득 채운다)
+function floorLine() {
+  const f = (BGS.find((g) => g.id === S.bg) || BGS[0]).floor;
+  const shown = Math.max(innerHeight, (innerWidth * 16) / 9);
+  return innerHeight - (1 - f) * shown;
+}
+function place() {
+  if ($('#room').hidden) return;
+  const W = innerWidth, H = innerHeight, cx = W / 2;
+  const barTop = $('#bar').getBoundingClientRect().top || H - 70;
+  const topEnd = $('#top').getBoundingClientRect().bottom;
+  const host = order.find((m) => m.host), guests = order.filter((m) => !m.host), n = guests.length;
+  const put = (mem, x, base, h) => {
+    const w = h * 0.86;
+    mem.seat = { x, base, h };
+    if (!mem.cur) mem.cur = { x, base, h };
+    Object.assign(mem.slot.style, { left: `${x - w / 2}px`, top: `${base - h}px`, width: `${w}px`, height: `${h}px`, zIndex: String(Math.round(base)) });
+  };
+  const fF = H * (n <= 3 ? 0.25 : n <= 6 ? 0.21 : n <= 9 ? 0.18 : 0.155);
+  const yFront = barTop - 20;
+  // 진행자는 바닥선 바로 아래(바닥 위)에 앉는다
+  const hostBase = clamp(floorLine() + H * 0.04, topEnd + H * 0.2, yFront - fF * 0.45);
+  const hostH = Math.min(H * (n <= 3 ? 0.4 : n <= 8 ? 0.34 : 0.29), hostBase - topEnd - 6);
+  if (host) put(host, cx, hostBase, hostH);
+  const yBack = Math.min(hostBase + fF * 0.3, yFront - fF * 0.2);
+  const tMax = THREE.MathUtils.degToRad(Math.min(95, 28 + 13 * n));
+  const Rx = Math.max(40, Math.min(W / 2 - fF * 0.72 * 0.43 - 4, H * 0.5));
+  guests.forEach((g, i) => {
+    const th = n === 1 ? 0 : -tMax + (2 * tMax * i) / (n - 1), d = Math.max(Math.cos(th), -0.12);
+    put(g, cx + Rx * Math.sin(th), yBack + (yFront - yBack) * d, fF * (0.72 + 0.28 * d));
+  });
+  const empty = $('#empty'); if (empty) empty.style.top = `${(hostBase + barTop) / 2 - 20}px`;
+}
+
+/* ---------- 표정·몸 데이터 ---------- */
+// 패킷: [[고개 x,y,z], [표정 0~100 ...], [몸 기울기 x,y (-100~100)]]
+const enc = (blend, e, lean) => [[+e.x.toFixed(3), +e.y.toFixed(3), +e.z.toFixed(3)], KEYS.map((k) => Math.round((blend[k] || 0) * 100)), [Math.round(lean.x * 100), Math.round(lean.y * 100)]];
 function applyPacket(mem, pk, mirror) {
-  const [e, b] = pk, blend = {};
+  const [e, b, l] = pk, blend = {};
   KEYS.forEach((k, i) => { blend[k] = (b[i] || 0) / 100; });
+  const lx = clamp(((l && l[0]) || 0) / 100, -1, 1), ly = clamp(((l && l[1]) || 0) / 100, -1, 1);
   if (mirror) {
     for (const k of KEYS) if (k.endsWith('Left')) { const r = k.replace(/Left$/, 'Right'), t = blend[k]; blend[k] = blend[r]; blend[r] = t; }
     mem.target.quat.setFromEuler(new THREE.Euler(e[0], -e[1], -e[2]));
-  } else mem.target.quat.setFromEuler(new THREE.Euler(e[0], e[1], e[2]));
+    mem.target.lean.set(-lx, ly);
+  } else { mem.target.quat.setFromEuler(new THREE.Euler(e[0], e[1], e[2])); mem.target.lean.set(lx, ly); }
   mem.target.blend = blend; mem.lastSeen = performance.now();
 }
 
 /* ---------- 얼굴 추적 ---------- */
 const cam = $('#cam');
-let landmarker = null, lastVT = -1, myPacket = null, myPacketAt = 0;
-const m4 = new THREE.Matrix4(), tmpE = new THREE.Euler();
+let landmarker = null, lastVT = -1, myPacket = null, myPacketAt = 0, lastFace = 0, baseX = null, baseY = null;
+const m4 = new THREE.Matrix4(), tmpE = new THREE.Euler(), tmpL = new THREE.Vector2();
 async function startCamera() {
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('nocam');
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
     cam.srcObject = stream; await cam.play();
-    S.camOn = true;
     if (!landmarker) {
       const { FaceLandmarker, FilesetResolver } = await import(`${MP}/vision_bundle.mjs`);
       const files = await FilesetResolver.forVisionTasks(`${MP}/wasm`);
@@ -297,27 +390,47 @@ async function startCamera() {
       try { landmarker = await FaceLandmarker.createFromOptions(files, opt('GPU')); }
       catch (e) { console.warn('GPU 실패, CPU로 전환', e); landmarker = await FaceLandmarker.createFromOptions(files, opt('CPU')); }
     }
+    S.camOn = true; lastFace = performance.now(); baseX = baseY = null;
     return true;
   } catch (err) { console.warn(err); S.camOn = false; return false; }
 }
-function stopCamera() { cam.srcObject?.getTracks().forEach((t) => t.stop()); cam.srcObject = null; S.camOn = false; myPacket = null; }
+function stopCamera() { cam.srcObject?.getTracks().forEach((t) => t.stop()); cam.srcObject = null; S.camOn = false; myPacket = null; iAmAway(false); }
 function track(now) {
-  if (!S.camOn || !landmarker || cam.readyState < 2 || cam.currentTime === lastVT) return;
-  lastVT = cam.currentTime;
-  let r; try { r = landmarker.detectForVideo(cam, now); } catch (e) { return; }
-  if (!r.faceBlendshapes?.length) return;
-  const blend = {};
-  for (const c of r.faceBlendshapes[0].categories) blend[c.categoryName] = c.score;
-  const mat = r.facialTransformationMatrixes?.[0];
-  if (mat) { m4.fromArray(mat.data); tmpE.setFromRotationMatrix(m4); const L = 0.6, c = THREE.MathUtils.clamp; tmpE.set(c(tmpE.x, -L, L), c(tmpE.y, -L, L), c(tmpE.z, -L, L)); } else tmpE.set(0, 0, 0);
-  setMyPacket(enc(blend, tmpE));
+  if (!S.camOn || !landmarker) return;
+  if (cam.readyState >= 2 && cam.currentTime !== lastVT) {
+    lastVT = cam.currentTime;
+    let r = null; try { r = landmarker.detectForVideo(cam, now); } catch (e) { /* 다음 프레임에 다시 */ }
+    if (r && r.faceBlendshapes?.length) {
+      const blend = {};
+      for (const c of r.faceBlendshapes[0].categories) blend[c.categoryName] = c.score;
+      const mat = r.facialTransformationMatrixes?.[0];
+      if (mat) { m4.fromArray(mat.data); tmpE.setFromRotationMatrix(m4); const L = 0.6; tmpE.set(clamp(tmpE.x, -L, L), clamp(tmpE.y, -L, L), clamp(tmpE.z, -L, L)); } else tmpE.set(0, 0, 0);
+      // 몸 기울기: 코 위치가 평소 자리에서 얼마나 벗어났는지
+      const nose = r.faceLandmarks?.[0]?.[1];
+      if (nose) {
+        if (baseX == null) { baseX = nose.x; baseY = nose.y; }
+        baseX += (nose.x - baseX) * 0.003; baseY += (nose.y - baseY) * 0.003;
+        tmpL.set(clamp((nose.x - baseX) * 4.5, -1, 1), clamp((nose.y - baseY) * 4.5, -1, 1));
+      } else tmpL.set(0, 0);
+      lastFace = now; iAmAway(false);
+      setMyPacket(enc(blend, tmpE, tmpL));
+    }
+  }
+  if (S.role !== 'host' && now - lastFace > AWAY_MS) iAmAway(true); // 진행자는 목소리로 계속 진행하므로 자리 비움 처리하지 않는다
 }
 function setMyPacket(pk) { myPacket = pk; myPacketAt = performance.now(); const me = members.get(S.myId); if (me) applyPacket(me, pk, true); }
+// 카메라에 얼굴이 한동안 안 보이면 자리를 비운 것으로 알린다
+function iAmAway(v) {
+  if (S.away === v || !S.myId) return;
+  S.away = v; setAway(S.myId, v);
+  if (S.role === 'host') cast({ t: 'away', id: S.myId, v }); else if (S.hostConn?.open) S.hostConn.send({ t: 'away', v });
+  if (v) say('카메라에 보이지 않아 자리 비움으로 표시됩니다'); else if (S.role === 'host') hostStatus(); else say($('#hostAudio').srcObject ? '진행자 목소리 연결됨' : '진행자 목소리를 기다리는 중…');
+}
 
 /* ---------- 연결 ---------- */
 const hostPeerId = (code) => PREFIX + code.toLowerCase() + '-host';
 const newCode = () => Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
-const roster = () => [...members.values()].map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, host: m.host }));
+const roster = () => [...members.values()].map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, host: m.host, away: m.away }));
 const cast = (msg, except) => { for (const [id, c] of S.conns) if (id !== except && c.open) c.send(msg); };
 const micConstraints = () => ({ audio: S.bowl ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
 
@@ -343,13 +456,15 @@ function onHostData(conn, msg) {
   if (msg.t === 'hello') {
     if (S.conns.size >= MAX_GUESTS) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 300); return; }
     const m = { id, name: String(msg.name || '참가자').slice(0, 12), avatar: AVATARS.some((a) => a.id === msg.avatar) ? msg.avatar : AVATARS[0].id, host: false };
-    S.conns.set(id, conn); addMember(m);
-    conn.send({ t: 'room', you: id, bg: S.bg, members: roster() });
+    S.conns.set(id, conn);
+    conn.send({ t: 'room', you: id, bg: S.bg, members: [...roster(), m] });
+    addMember(m, true);
     cast({ t: 'join', m }, id);
     if (S.mic) S.calls.set(id, S.peer.call(id, S.mic));
   } else if (!S.conns.has(id)) return;
   else if (msg.t === 'p' && Array.isArray(msg.k)) { const mem = members.get(id); if (mem) { applyPacket(mem, msg.k, false); mem.raw = msg.k; } }
   else if (msg.t === 'avatar' && AVATARS.some((a) => a.id === msg.avatar)) { setAvatar(id, msg.avatar); cast({ t: 'avatar', id, avatar: msg.avatar }); }
+  else if (msg.t === 'away') { setAway(id, !!msg.v); cast({ t: 'away', id, v: !!msg.v }, id); }
 }
 function joinRoom(code) {
   return new Promise((resolve, reject) => {
@@ -370,10 +485,11 @@ function joinRoom(code) {
       conn.on('data', (msg) => {
         if (!msg || typeof msg !== 'object') return;
         if (msg.t === 'full') { clearTimeout(timer); fail('수업 정원이 가득 찼습니다.'); }
-        else if (msg.t === 'room') { clearTimeout(timer); done = true; S.peer = peer; S.hostConn = conn; S.code = code; S.myId = id; setBg(msg.bg); for (const m of msg.members || []) addMember(m); resolve(); }
-        else if (msg.t === 'join') addMember(msg.m);
+        else if (msg.t === 'room') { clearTimeout(timer); done = true; S.peer = peer; S.hostConn = conn; S.code = code; S.myId = id; setBg(msg.bg); for (const m of msg.members || []) addMember(m, m.id === id); resolve(); }
+        else if (msg.t === 'join') addMember(msg.m, true);
         else if (msg.t === 'leave') removeMember(msg.id);
         else if (msg.t === 'avatar') setAvatar(msg.id, msg.avatar);
+        else if (msg.t === 'away') { if (msg.id !== S.myId) setAway(msg.id, !!msg.v); }
         else if (msg.t === 'bg') setBg(msg.bg);
         else if (msg.t === 'ps') { for (const pid in msg.a) { if (pid === S.myId) continue; const mem = members.get(pid); if (mem) applyPacket(mem, msg.a[pid], false); } }
         else if (msg.t === 'end') endClass('진행자가 수업을 마쳤습니다. 함께해 주셔서 고맙습니다.');
@@ -384,7 +500,7 @@ function joinRoom(code) {
 }
 function playHost(stream) {
   const a = $('#hostAudio'); a.srcObject = stream;
-  a.play().then(() => { $('#unmute').hidden = true; say('진행자 목소리 연결됨'); }).catch(() => { $('#unmute').hidden = false; });
+  a.play().then(() => { $('#unmute').hidden = true; if (!S.away) say('진행자 목소리 연결됨'); }).catch(() => { $('#unmute').hidden = false; });
 }
 $('#unmute').addEventListener('click', () => { $('#hostAudio').play().then(() => { $('#unmute').hidden = true; say('진행자 목소리 연결됨'); }).catch(() => {}); });
 
@@ -408,34 +524,17 @@ function setBg(id) {
   if (S.bg === id && $('#bg').getAttribute('src')) return;
   S.bg = id;
   $('#bg').src = bgUrl(id);
+  place();
 }
 function toBar() {
   const bar = $('#bar'); bar.replaceChildren();
-  const add = (label, on, fn, cls) => { const b = el('button', 'btn' + (cls ? ' ' + cls : ''), label); b.type = 'button'; if (on != null) b.setAttribute('aria-pressed', String(on)); b.addEventListener('click', fn); bar.append(b); return b; };
+  const add = (text, on, fn, cls) => { const b = el('button', 'btn' + (cls ? ' ' + cls : ''), text); b.type = 'button'; if (on != null) b.setAttribute('aria-pressed', String(on)); b.addEventListener('click', fn); bar.append(b); return b; };
   if (S.role === 'host') add(S.micOn ? '마이크 켜짐' : '마이크 꺼짐', S.micOn, toggleMic);
   add(S.camOn ? '카메라 켜짐' : '카메라 꺼짐', S.camOn, toggleCam);
   add('아바타', null, () => openSheet('avatar'));
   if (S.role === 'host') { add('배경·소리', null, () => openSheet('host')); add('초대', null, invite); }
   add(S.role === 'host' ? '수업 종료' : '나가기', null, leave, 'danger');
-}
-function openSheet(kind) {
-  const sh = $('#sheet'); sh.replaceChildren(); sh.hidden = false;
-  const close = el('button', 'chip', '닫기'); close.type = 'button'; close.addEventListener('click', () => { sh.hidden = true; });
-  if (kind === 'avatar') {
-    sh.append(el('h2', null, '내 아바타'));
-    const row = el('div', 'row');
-    avatarRow(row, (id) => { pickAvatar(id); sh.hidden = true; });
-    sh.append(row);
-  } else {
-    sh.append(el('h2', null, '배경 (모두에게 바뀝니다)'));
-    const row = el('div', 'row');
-    for (const g of BGS) { const b = el('button', 'thumb'); b.type = 'button'; b.setAttribute('aria-label', g.label); b.setAttribute('aria-pressed', String(g.id === S.bg)); b.style.backgroundImage = `url(${bgUrl(g.id, true)})`; b.addEventListener('click', () => { setBg(g.id); cast({ t: 'bg', bg: g.id }); openSheet('host'); }); row.append(b); }
-    sh.append(row, el('h2', null, '소리'));
-    const row2 = el('div', 'row'), bowl = el('button', 'chip', '싱잉볼 모드 (잡음 제거 끔)'); bowl.type = 'button'; bowl.setAttribute('aria-pressed', String(S.bowl));
-    bowl.addEventListener('click', async () => { S.bowl = !S.bowl; await startMic(); openSheet('host'); });
-    row2.append(bowl); sh.append(row2);
-  }
-  sh.append(close);
+  place();
 }
 function avatarRow(row, onPick) {
   row.replaceChildren();
@@ -446,6 +545,25 @@ function avatarRow(row, onPick) {
     row.append(b);
   }
   row.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+function openSheet(kind) {
+  const sh = $('#sheet'); sh.replaceChildren(); sh.hidden = false;
+  const close = el('button', 'chip', '닫기'); close.type = 'button'; close.addEventListener('click', () => { sh.hidden = true; });
+  if (kind === 'avatar') {
+    sh.append(el('h2', null, '내 아바타'));
+    const row = el('div', 'row');
+    sh.append(row);
+    avatarRow(row, (id) => { pickAvatar(id); sh.hidden = true; });
+  } else {
+    sh.append(el('h2', null, '배경 (모두에게 바뀝니다)'));
+    const row = el('div', 'row');
+    for (const g of BGS) { const b = el('button', 'thumb'); b.type = 'button'; b.setAttribute('aria-label', g.label); b.setAttribute('aria-pressed', String(g.id === S.bg)); b.style.backgroundImage = `url(${bgUrl(g.id, true)})`; b.addEventListener('click', () => { setBg(g.id); cast({ t: 'bg', bg: g.id }); openSheet('host'); }); row.append(b); }
+    sh.append(row, el('h2', null, '소리'));
+    const row2 = el('div', 'row'), bowl = el('button', 'chip', '싱잉볼 모드 (잡음 제거 끔)'); bowl.type = 'button'; bowl.setAttribute('aria-pressed', String(S.bowl));
+    bowl.addEventListener('click', async () => { S.bowl = !S.bowl; await startMic(); openSheet('host'); });
+    row2.append(bowl); sh.append(row2);
+  }
+  sh.append(close);
 }
 function pickAvatar(id) {
   S.avatar = id; try { localStorage.setItem('medclass-avatar', id); } catch (e) { /* 무시 */ }
@@ -518,7 +636,7 @@ $('#enter').addEventListener('click', async () => {
   S.name = name.slice(0, 12); S.role = mode;
   try { localStorage.setItem('medclass-name', S.name); } catch (e) { /* 무시 */ }
   try {
-    if (mode === 'host') { await openHost(); addMember({ id: S.myId, name: S.name, avatar: S.avatar, host: true }); await startMic(); }
+    if (mode === 'host') { await openHost(); addMember({ id: S.myId, name: S.name, avatar: S.avatar, host: true }, true); await startMic(); }
     else await joinRoom(code);
   } catch (err) {
     console.error(err); btn.disabled = false; setMode(mode);
@@ -527,45 +645,67 @@ $('#enter').addEventListener('click', async () => {
   }
   $('#lobby').hidden = true; $('#room').hidden = false;
   $('#codePill').textContent = `코드 ${S.code}`;
-  setBg(S.bg); layout(); resize(); keepAwake();
+  setBg(S.bg); resize(); keepAwake();
   if (S.role === 'host') hostStatus(); else say('진행자 목소리를 기다리는 중…');
-  toBar();
+  toBar(); layout();
+  for (const m of members.values()) if (m.st === 'entering') m.t0 = performance.now(); // 방이 보이는 순간부터 걸어 들어오게
   await startCamera(); toBar();
   if (S.role === 'join' && !S.camOn) say('카메라 없이 참가 중 · 아바타는 가만히 앉아 있습니다');
 });
 addEventListener('pagehide', () => { if (S.role === 'host' && !S.ended) cast({ t: 'end' }); });
 
 /* ---------- 루프 ---------- */
-function resize() { renderer.setSize(innerWidth, innerHeight, false); }
-addEventListener('resize', resize);
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.right = innerWidth; camera.top = innerHeight; camera.updateProjectionMatrix();
+}
+addEventListener('resize', () => { resize(); place(); });
 const clock = new THREE.Clock();
+function animate(mem, now, dt, t, a) {
+  const inst = mem.inst, seat = mem.seat || mem.cur; if (!inst || !seat || !mem.cur) return;
+  const c = mem.cur, p = mem.pose, W = innerWidth;
+  const lost = now - mem.lastSeen > 900;
+  for (const k of KEYS) p.blend[k] = lerp(p.blend[k] || 0, lost ? 0 : mem.target.blend[k] || 0, a);
+  if (lost) { mem.target.quat.identity(); mem.target.lean.set(0, 0); }
+  p.quat.slerp(mem.target.quat, lost ? a * 0.3 : a); p.euler.setFromQuaternion(p.quat);
+  p.lean.lerp(mem.target.lean, a * 0.5);
+  // 자리가 바뀌면 부드럽게 옮겨 앉는다
+  const m = 1 - Math.pow(0.02, dt);
+  c.base = lerp(c.base, seat.base, m); c.h = lerp(c.h, seat.h, m);
+  const edge = seat.x < W / 2 ? -seat.h * 0.5 : W + seat.h * 0.5;
+  let x = c.x = lerp(c.x, seat.x, m), sit = 1, up = 0, squat = 1, step = 0;
+  const u = (now - mem.t0) / 1000;
+  if (mem.st === 'wait' || mem.st === 'gone') { inst.root.visible = false; return; }
+  if (mem.st === 'entering') {
+    if (u < WALK_S) { x = lerp(edge, seat.x, ease(u / WALK_S)); sit = 0; up = Math.min(1, u * 4); squat = 0; step = u * 9; }
+    else if (u < WALK_S + SIT_S) { const k = ease((u - WALK_S) / SIT_S); sit = k; up = 1 - k; squat = k; }
+    else { mem.st = 'seated'; label(mem); }
+  } else if (mem.st === 'leaving') {
+    if (u < SIT_S) { const k = ease(u / SIT_S); sit = 1 - k; up = k; squat = 1 - k; }
+    else if (u < SIT_S + WALK_S) { const v = (u - SIT_S) / WALK_S; x = lerp(seat.x, edge, ease(v)); sit = 0; up = Math.min(1, (1 - v) * 4); squat = 0; step = v * WALK_S * 9; }
+    else { mem.st = 'gone'; label(mem); inst.root.visible = false; return; }
+  }
+  inst.root.visible = true;
+  inst.root.position.set(x, innerHeight - c.base, 0);
+  inst.root.scale.setScalar(c.h);
+  inst.draw(p, t, Math.round(c.base) * 2, sit, up, squat, step);
+}
 function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.1), now = performance.now(), t = clock.elapsedTime;
   track(now); netTick(now);
-  renderer.setScissor(0, 0, innerWidth, innerHeight); renderer.setViewport(0, 0, innerWidth, innerHeight); renderer.clear();
-  if ($('#room').hidden) return;
-  const a = 1 - Math.pow(0.0005, dt * 4), tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  for (const mem of members.values()) {
-    const lost = now - mem.lastSeen > 900, p = mem.pose;
-    for (const k of KEYS) p.blend[k] = THREE.MathUtils.lerp(p.blend[k] || 0, lost ? 0 : mem.target.blend[k] || 0, a);
-    if (lost) mem.target.quat.identity();
-    p.quat.slerp(mem.target.quat, lost ? a * 0.3 : a); p.euler.setFromQuaternion(p.quat);
-    const inst = mem.inst; if (!inst || !mem.slot) continue;
-    inst.update(p, dt, t);
-    const r = mem.slot.getBoundingClientRect(); if (r.width < 8 || r.height < 8) continue;
-    const y = innerHeight - r.bottom;
-    renderer.setViewport(r.left, y, r.width, r.height); renderer.setScissor(r.left, y, r.width, r.height);
-    camera.aspect = r.width / r.height;
-    const dist = Math.max(inst.halfH / tan, inst.halfW / (tan * camera.aspect)) * 1.04;
-    const up = Math.max(0, dist * tan - inst.halfH * 1.04); // 가로 폭에 맞춰질 때는 슬롯 바닥에 붙여 앉힌다
-    camera.position.set(0, up, dist); camera.lookAt(0, up, 0); camera.updateProjectionMatrix();
-    inst.root.visible = true; renderer.render(scene, camera); inst.root.visible = false;
+  if ($('#room').hidden) { renderer.clear(); return; }
+  const a = 1 - Math.pow(0.0005, dt * 4);
+  for (const mem of order) animate(mem, now, dt, t, a);
+  for (let i = ghosts.length - 1; i >= 0; i--) {
+    const g = ghosts[i]; animate(g, now, dt, t, a);
+    if (g.st === 'gone') { g.token++; g.inst?.dispose(); ghosts.splice(i, 1); }
   }
+  renderer.render(scene, camera);
 }
 
 /* ---------- 시작 ---------- */
-window.__cls = { S, members, setMyPacket, enc, repose: () => { for (const m of members.values()) loadInst(m); } };
+window.__cls = { S, members, addMember, removeMember, setAway, setMyPacket, enc };
 try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; const av = localStorage.getItem('medclass-avatar'); if (AVATARS.some((a) => a.id === av)) S.avatar = av; } catch (e) { /* 무시 */ }
 const lobbyPick = (id) => { pickAvatar(id); avatarRow($('#lobbyAv'), lobbyPick); };
 avatarRow($('#lobbyAv'), lobbyPick);
