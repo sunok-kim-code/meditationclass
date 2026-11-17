@@ -74,6 +74,10 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 .thumb.av{width:72px;height:84px;background-color:rgba(255,255,255,.08);background-size:contain;background-repeat:no-repeat}
 .thumb.add{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:1px dashed rgba(255,255,255,.4);font-size:11px;line-height:1.25;color:#e8ece6}
 .thumb.add b{font-size:22px;font-weight:400;line-height:1}
+#inapp{position:fixed;inset:0;z-index:80;overflow:auto;background:#0f1513;padding:calc(28px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom))}
+#inapp .panel{max-width:420px;margin:0 auto}
+#inapp h2{margin:0 0 10px;font-size:19px;font-weight:600;line-height:1.4}
+#inapp ol{margin:14px 0 0;padding-left:20px;font-size:14px;line-height:1.7;color:#d6dbd3}
 #maker{position:fixed;inset:0;z-index:60;overflow:auto;background:#0f1513;padding:calc(18px + env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom))}
 #maker .panel{max-width:420px;margin:0 auto}
 #maker h2{margin:0 0 6px;font-size:17px;font-weight:600}
@@ -142,6 +146,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
   </div>
 </div>
 
+<div id="inapp" hidden></div>
 <div id="maker" hidden></div>
 
 <div id="over" hidden><p id="overMsg"></p><button type="button" id="overBtn">처음으로</button></div>
@@ -1339,6 +1344,29 @@ function avatarRow(row, onPick) {
   }
   row.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
+/* ---------- 카카오톡 등 앱 안 브라우저 안내 ---------- */
+// 카톡 링크를 누르면 카톡 안의 브라우저로 열리는데, 거기서는 카메라·마이크가 막히는 경우가 많다. 삼성 인터넷·크롬·사파리로 열도록 안내한다
+function inAppGuide() {
+  const ua = navigator.userAgent || '', kakao = /KAKAOTALK/i.test(ua), other = /NAVER\(inapp|Instagram|FBAN|FBAV|Line\/|DaumApps|everytimeApp|BAND\//i.test(ua);
+  if (!kakao && !other) return;
+  let skip = false; try { skip = sessionStorage.getItem('medclass-inapp') === '1'; } catch (e) { /* 무시 */ }
+  if (skip) return;
+  const ios = /iPhone|iPad|iPod/i.test(ua), url = location.href;
+  const outside = () => { if (kakao) location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url); else if (!ios) location.href = `intent://${url.replace(/^https?:\/\//, '')}#Intent;scheme=https;end`; };
+  const box = $('#inapp'), panel = el('div', 'panel'); box.replaceChildren(panel); box.hidden = false;
+  panel.append(el('h2', null, kakao ? '카카오톡 안에서는 카메라와 마이크가 잘 안 됩니다' : '이 앱 안에서는 카메라와 마이크가 잘 안 됩니다'));
+  panel.append(el('p', 'note', ios ? '사파리(Safari)로 열어 주세요.' : '삼성 인터넷이나 크롬으로 열어 주세요.'));
+  if (kakao || !ios) { const go = el('button', 'primary', '다른 브라우저로 열기'); go.type = 'button'; go.addEventListener('click', outside); panel.append(go); }
+  const copy = el('button', 'ghost', '주소 복사하기'); copy.type = 'button';
+  copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(url); copy.textContent = '복사했습니다 · 브라우저 주소창에 붙여 넣어 주세요'; } catch (e) { copy.textContent = url; } });
+  panel.append(copy);
+  const ol = el('ol'); panel.append(el('p', 'note', '버튼이 안 되면 이렇게 해 주세요.'), ol);
+  for (const t of ios ? ['화면 오른쪽 아래의 공유 아이콘(네모에 화살표)을 누릅니다.', '"Safari로 열기"를 누릅니다.'] : ['화면 오른쪽 위의 점 세 개(⋮)를 누릅니다.', '"다른 브라우저로 열기"를 누릅니다.', '삼성 인터넷 또는 Chrome을 고릅니다.']) ol.append(el('li', null, t));
+  const stay = el('button', 'ghost', '그냥 여기서 계속하기'); stay.type = 'button';
+  stay.addEventListener('click', () => { try { sessionStorage.setItem('medclass-inapp', '1'); } catch (e) { /* 무시 */ } box.hidden = true; });
+  panel.append(stay);
+  if (kakao) setTimeout(outside, 400); // 카톡은 바깥 브라우저를 여는 주소가 있어 먼저 한 번 시도한다
+}
 /* ---------- 내 사진으로 아바타 만들기 ---------- */
 const MK = { busy: false, file: null, info: null, cancel: false };
 const MK_ERR = { not_configured: '아직 준비되지 않았습니다. 진행자가 서버 설정(OpenAI 키)을 마쳐야 합니다.', bad_code: '만들기 코드가 맞지 않습니다. 진행자에게 확인해 주세요.', bad_image: '사진을 읽지 못했습니다. 다른 사진으로 해 보세요.', opaque: '그림 배경이 투명하게 나오지 않았습니다. 다시 시도해 주세요.', forbidden: '이 사이트에서만 쓸 수 있습니다.' };
@@ -1640,6 +1668,7 @@ function tick() {
 window.__cls = { S, members, addMember, removeMember, setAway, setAvatar, setMyPacket, enc, CUSTOM, createCustom, pickAvatar, askTalk, setTalker, setView, startShare, stopShare, SHR };
 try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; const av = localStorage.getItem('medclass-avatar'); if (AVATARS.some((a) => a.id === av)) S.avatar = av; } catch (e) { /* 무시 */ }
 { let v = null; try { v = localStorage.getItem('medclass-view'); } catch (e) { /* 무시 */ } setView(v); }
+inAppGuide();
 loadMine().then((ok) => { if (!ok) return; try { if (localStorage.getItem('medclass-avatar') === S.mine && !S.myId) S.avatar = S.mine; } catch (e) { /* 무시 */ } avatarRow($('#lobbyAv'), lobbyPick); });
 const lobbyPick = (id) => { pickAvatar(id); avatarRow($('#lobbyAv'), lobbyPick); };
 avatarRow($('#lobbyAv'), lobbyPick);
