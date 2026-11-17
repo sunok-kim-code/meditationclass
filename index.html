@@ -13,6 +13,9 @@ button:focus-visible,input:focus-visible{outline:2px solid #fff;outline-offset:2
 #bg{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;object-position:center bottom}
 #shade{position:fixed;inset:0;background:linear-gradient(to bottom,rgba(13,17,16,.25),rgba(13,17,16,0) 22%,rgba(13,17,16,0) 55%,rgba(13,17,16,.7))}
 #gl{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
+/* 참가자 보기: 배경을 가라앉히고, 한 사람씩 벽과 바닥이 있는 칸에 앉힌다 (허공에 뜬 것처럼 보이지 않게) */
+#cards{position:fixed;inset:0;background:rgba(13,17,16,.62);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+#cards i{position:absolute;display:block;border-radius:18px;overflow:hidden;background:linear-gradient(to bottom,#46574e 0%,#3a4a42 71%,#8a7358 71%,#6f5c46 100%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
 
 /* 로비 */
 #lobby{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(13,17,16,.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);overflow:auto}
@@ -86,6 +89,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 <body>
 <img id="bg" alt="">
 <div id="shade"></div>
+<div id="cards" hidden></div>
 <canvas id="gl"></canvas>
 <video id="cam" muted playsinline hidden></video>
 <audio id="hostAudio" autoplay playsinline></audio>
@@ -720,19 +724,26 @@ function place() {
   };
   // 이 보기에서 안 보이는 사람: 자리는 그대로 두고 그림과 이름표만 감춘다
   const hide = (mem) => { mem.hide = true; if (!mem.seat) put(mem, cx, H * 0.6, H * 0.2), mem.hide = true; mem.slot.style.display = 'none'; };
-  const empty = $('#empty');
+  const empty = $('#empty'), cards = $('#cards');
   if (view === 'grid') {
     // 참가자만: 모두가 가리지 않고 보이게 줄을 맞춘다 (뒷줄이 위)
     if (host) hide(host);
     const cols = n <= 2 ? Math.max(n, 1) : n <= 4 ? 2 : n <= 9 ? 3 : 4, rows = Math.max(1, Math.ceil(n / cols));
-    const top = topEnd + 8, cellW = (W - 12) / cols, cellH = (barTop - 14 - top) / rows, h = Math.min(cellH * 0.66, (cellW * 0.94) / 0.86, H * 0.3);
+    const top = topEnd + 8, cellW = Math.min((W - 12) / cols, 260), cellH = Math.min((barTop - 12 - top) / rows, cellW * 1.5), h = Math.min(cellH * 0.6, (cellW * 0.88) / 0.86);
+    const y0 = top + (barTop - 12 - top - cellH * rows) / 2;
+    while (cards.childElementCount > n) cards.lastChild.remove();
+    while (cards.childElementCount < n) cards.append(document.createElement('i'));
     guests.forEach((g, i) => {
       const r = Math.floor(i / cols), inRow = r === rows - 1 ? n - cols * (rows - 1) : cols, c = i - r * cols;
-      put(g, cx + (c - (inRow - 1) / 2) * cellW, top + cellH * (r + 1) - cellH * 0.08, h);
+      const x = cx + (c - (inRow - 1) / 2) * cellW, yT = y0 + cellH * r;
+      Object.assign(cards.children[i].style, { left: `${x - cellW / 2 + 4}px`, top: `${yT + 4}px`, width: `${cellW - 8}px`, height: `${cellH - 8}px` });
+      put(g, x, yT + cellH * 0.87, h); // 칸 아래쪽 바닥 띠 위에 앉는다
     });
+    cards.hidden = false;
     if (empty) empty.style.top = `${H * 0.45}px`;
     return;
   }
+  cards.hidden = true;
   if (view === 'host') {
     // 진행자만 크게
     guests.forEach(hide);
