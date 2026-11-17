@@ -34,6 +34,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
 /* 수업방 */
 #room{position:fixed;inset:0;display:flex;flex-direction:column;padding:calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom))}
 #top{display:flex;align-items:center;gap:8px;min-height:36px}
+#viewBtn{border:1px solid rgba(255,255,255,.35);color:inherit;font:inherit;cursor:pointer;white-space:nowrap;flex:none}
 .pill{padding:7px 12px;border-radius:999px;background:rgba(13,17,16,.62);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:12.5px;line-height:1.3;white-space:nowrap}
 #status{white-space:normal;margin-left:auto;text-align:right;max-width:58%}
 #status.bad{background:rgba(120,30,24,.85)}
@@ -94,6 +95,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
   <div id="top">
     <span class="pill" id="codePill"></span>
     <span class="pill" id="countPill"></span>
+    <button class="pill" id="viewBtn" type="button"></button>
     <span class="pill" id="status" role="status"></span>
   </div>
   <div id="stage"></div>
@@ -694,18 +696,63 @@ function floorLine() {
   const shown = Math.max(innerHeight, (innerWidth * 16) / 9);
   return innerHeight - (1 - f) * shown;
 }
+// 보는 방식 (내 화면에만 적용): 수업(진행자 + 반원) / 참가자만(줄 맞춰) / 진행자만 크게 / 둥글게 둘러앉기
+const VIEWS = [['class', '수업'], ['grid', '참가자'], ['host', '진행자'], ['circle', '원형']];
+function setView(v) {
+  S.view = VIEWS.some((q) => q[0] === v) ? v : 'class';
+  try { localStorage.setItem('medclass-view', S.view); } catch (e) { /* 무시 */ }
+  const b = $('#viewBtn'), name = VIEWS.find((q) => q[0] === S.view)[1];
+  b.textContent = `보기: ${name}`; b.setAttribute('aria-label', `보는 방식 바꾸기, 지금은 ${name}`);
+  place();
+}
+$('#viewBtn').addEventListener('click', () => setView(VIEWS[(VIEWS.findIndex((q) => q[0] === S.view) + 1) % VIEWS.length][0]));
 function place() {
   if ($('#room').hidden) return;
-  const W = innerWidth, H = innerHeight, cx = W / 2;
-  const barTop = $('#bar').getBoundingClientRect().top || H - 70;
+  const W = innerWidth, H = innerHeight, cx = W / 2, view = S.view || 'class';
+  const asks = $('#asks'), barTop = (!asks.hidden && asks.getBoundingClientRect().top) || $('#bar').getBoundingClientRect().top || H - 70;
   const topEnd = $('#top').getBoundingClientRect().bottom;
   const host = order.find((m) => m.host), guests = order.filter((m) => !m.host), n = guests.length;
   const put = (mem, x, base, h) => {
     const w = h * 0.86;
-    mem.seat = { x, base, h };
+    mem.seat = { x, base, h }; mem.hide = false;
     if (!mem.cur) mem.cur = { x, base, h };
-    Object.assign(mem.slot.style, { left: `${x - w / 2}px`, top: `${base - h}px`, width: `${w}px`, height: `${h}px`, zIndex: String(Math.round(base)) });
+    Object.assign(mem.slot.style, { display: '', left: `${x - w / 2}px`, top: `${base - h}px`, width: `${w}px`, height: `${h}px`, zIndex: String(Math.round(base)) });
   };
+  // 이 보기에서 안 보이는 사람: 자리는 그대로 두고 그림과 이름표만 감춘다
+  const hide = (mem) => { mem.hide = true; if (!mem.seat) put(mem, cx, H * 0.6, H * 0.2), mem.hide = true; mem.slot.style.display = 'none'; };
+  const empty = $('#empty');
+  if (view === 'grid') {
+    // 참가자만: 모두가 가리지 않고 보이게 줄을 맞춘다 (뒷줄이 위)
+    if (host) hide(host);
+    const cols = n <= 2 ? Math.max(n, 1) : n <= 4 ? 2 : n <= 9 ? 3 : 4, rows = Math.max(1, Math.ceil(n / cols));
+    const top = topEnd + 8, cellW = (W - 12) / cols, cellH = (barTop - 14 - top) / rows, h = Math.min(cellH * 0.66, (cellW * 0.94) / 0.86, H * 0.3);
+    guests.forEach((g, i) => {
+      const r = Math.floor(i / cols), inRow = r === rows - 1 ? n - cols * (rows - 1) : cols, c = i - r * cols;
+      put(g, cx + (c - (inRow - 1) / 2) * cellW, top + cellH * (r + 1) - cellH * 0.08, h);
+    });
+    if (empty) empty.style.top = `${H * 0.45}px`;
+    return;
+  }
+  if (view === 'host') {
+    // 진행자만 크게
+    guests.forEach(hide);
+    const h = Math.min(H * 0.44, (W * 0.98) / 0.86, (barTop - topEnd) * 0.62);
+    if (host) put(host, cx, clamp(floorLine() + H * 0.13, topEnd + h * 1.42, barTop - 22), h);
+    if (empty) empty.style.top = `${H * 2}px`;
+    return;
+  }
+  if (view === 'circle') {
+    // 둥글게 둘러앉기: 진행자가 맨 뒤 가운데, 참가자가 원을 따라 앉는다 (멀수록 작게)
+    const all = host ? [host, ...guests] : guests, k = all.length;
+    const f = H * (k <= 4 ? 0.22 : k <= 8 ? 0.185 : 0.155), yFront = barTop - 18;
+    const yBack = clamp(floorLine() + H * 0.05, topEnd + f * 0.72 * 1.45, yFront - f * 0.9), Rx = Math.max(40, Math.min(W / 2 - f * 0.45, H * 0.42));
+    all.forEach((m, i) => {
+      const th = (2 * Math.PI * i) / Math.max(k, 1), d = (1 - Math.cos(th)) / 2; // d: 0 맨 뒤 → 1 맨 앞
+      put(m, cx + Rx * Math.sin(th), yBack + (yFront - yBack) * d, f * (0.72 + 0.28 * d));
+    });
+    if (empty) empty.style.top = `${(yBack + yFront) / 2 - 20}px`;
+    return;
+  }
   let fF = H * (n <= 3 ? 0.25 : n <= 6 ? 0.21 : n <= 9 ? 0.18 : 0.155);
   const yFront = barTop - 20;
   // 진행자는 바닥선 바로 아래(바닥 위)에 앉는다
@@ -720,7 +767,7 @@ function place() {
     const th = n === 1 ? 0 : -tMax + (2 * tMax * i) / (n - 1), d = Math.max(Math.cos(th), -0.12);
     put(g, cx + Rx * Math.sin(th), yBack + (yFront - yBack) * d, fF * (0.72 + 0.28 * d));
   });
-  const empty = $('#empty'); if (empty) empty.style.top = `${(hostBase + barTop) / 2 - 20}px`;
+  if (empty) empty.style.top = `${(hostBase + barTop) / 2 - 20}px`;
 }
 
 /* ---------- 표정·몸 데이터 ---------- */
@@ -1406,7 +1453,7 @@ function animate(mem, now, dt, t, a) {
   const edge = seat.x < W / 2 ? -seat.h * 0.6 : W + seat.h * 0.6;
   let x = c.x = lerp(c.x, seat.x, m), sit = 1, up = 0, squat = 1, walk = 0, step = 0, dir = 1;
   const u = mem.fixU != null ? mem.fixU : (now - mem.t0) / 1000; // fixU: 점검용으로 장면을 한 순간에 멈춰 볼 때만 쓴다
-  if (mem.st === 'wait' || mem.st === 'gone') { inst.root.visible = false; return; }
+  if (mem.st === 'wait' || mem.st === 'gone' || mem.hide) { inst.root.visible = false; return; } // hide: 지금 보기에서는 안 보이는 사람
   // 걷기: 키에 맞는 일정한 속도로 걷고, 걸은 거리만큼 걸음을 옮긴다(발이 미끄러져 보이지 않게)
   const speed = seat.h * 1.15, dist = Math.abs(seat.x - edge), walkT = dist / speed, stride = seat.h * 0.62;
   const walking = (d) => { walk = inst.canWalk ? 1 : 0; up = inst.canWalk ? 0 : 1; sit = 0; squat = 0; step = (d / stride) * Math.PI; };
@@ -1443,8 +1490,9 @@ function tick() {
 }
 
 /* ---------- 시작 ---------- */
-window.__cls = { S, members, addMember, removeMember, setAway, setAvatar, setMyPacket, enc, CUSTOM, createCustom, pickAvatar, askTalk, setTalker };
+window.__cls = { S, members, addMember, removeMember, setAway, setAvatar, setMyPacket, enc, CUSTOM, createCustom, pickAvatar, askTalk, setTalker, setView };
 try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; const av = localStorage.getItem('medclass-avatar'); if (AVATARS.some((a) => a.id === av)) S.avatar = av; } catch (e) { /* 무시 */ }
+{ let v = null; try { v = localStorage.getItem('medclass-view'); } catch (e) { /* 무시 */ } setView(v); }
 loadMine().then((ok) => { if (!ok) return; try { if (localStorage.getItem('medclass-avatar') === S.mine && !S.myId) S.avatar = S.mine; } catch (e) { /* 무시 */ } avatarRow($('#lobbyAv'), lobbyPick); });
 const lobbyPick = (id) => { pickAvatar(id); avatarRow($('#lobbyAv'), lobbyPick); };
 avatarRow($('#lobbyAv'), lobbyPick);
