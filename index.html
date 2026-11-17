@@ -14,8 +14,16 @@ button:focus-visible,input:focus-visible{outline:2px solid #fff;outline-offset:2
 #shade{position:fixed;inset:0;background:linear-gradient(to bottom,rgba(13,17,16,.25),rgba(13,17,16,0) 22%,rgba(13,17,16,0) 55%,rgba(13,17,16,.7))}
 #gl{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
 /* 참가자 보기: 배경을 가라앉히고, 한 사람씩 벽과 바닥이 있는 칸에 앉힌다 (허공에 뜬 것처럼 보이지 않게) */
+#share{position:fixed;left:8px;right:8px;z-index:20;display:flex;align-items:center;justify-content:center;border-radius:14px;overflow:hidden;background:#0b0e0d}
+#share.full{left:0;right:0;top:0!important;height:100%!important;border-radius:0;z-index:55}
+#share video,#share canvas{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;background:#000}
+#share video{width:100%;height:100%}
+#shareTools{position:absolute;left:0;right:0;bottom:8px;display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap;pointer-events:none}
+#share.full #shareTools{bottom:calc(10px + env(safe-area-inset-bottom))}
+#shareTools .chip{pointer-events:auto;min-height:36px;padding:0 12px;background:rgba(13,17,16,.78);color:#f1f3ee}
+#shareTools .pg{padding:6px 10px;border-radius:999px;background:rgba(13,17,16,.78);font-size:12.5px}
 #cards{position:fixed;inset:0;background:rgba(13,17,16,.62);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
-#cards i{position:absolute;display:block;border-radius:18px;overflow:hidden;background:linear-gradient(to bottom,#46574e 0%,#3a4a42 71%,#8a7358 71%,#6f5c46 100%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+#cards i{position:absolute;display:block;border-radius:18px;overflow:hidden;background:linear-gradient(to bottom,var(--w1,#46574e) 0%,var(--w2,#3a4a42) 71%,var(--f1,#8a7358) 71%,var(--f2,#6f5c46) 100%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
 
 /* 로비 */
 #lobby{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(13,17,16,.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);overflow:auto}
@@ -107,6 +115,7 @@ input.code{letter-spacing:.3em;text-transform:uppercase;font-weight:600}
   <div id="bar"></div>
 </div>
 
+<div id="share" hidden><video id="shareVideo" playsinline autoplay hidden></video><canvas id="shareCanvas" hidden></canvas><video id="shareFile" playsinline controls hidden></video><div id="shareTools"></div></div>
 <div id="sheet" hidden></div>
 <button id="unmute" type="button" hidden>소리 켜기</button>
 
@@ -161,8 +170,9 @@ const AVATARS = [
 ];
 // floor: 배경 그림에서 바닥이 시작되는 높이(위에서부터의 비율)
 const BGS = [
-  { id: 'center', label: '명상 센터', floor: 0.575 }, { id: 'temple', label: '산사', floor: 0.595 }, { id: 'bamboo', label: '대나무 숲', floor: 0.585 },
-  { id: 'beach', label: '바닷가', floor: 0.56 }, { id: 'mountain', label: '산', floor: 0.545 }, { id: 'night', label: '밤하늘', floor: 0.605 },
+  // card: 참가자 보기의 칸 색 [벽 위, 벽 아래, 바닥 위, 바닥 아래] — 배경 분위기에 맞춘다
+  { id: 'center', label: '명상 센터', floor: 0.575, card: ['#6c7b63', '#56664f', '#a98558', '#8a6a45'] }, { id: 'temple', label: '산사', floor: 0.595, card: ['#7a5340', '#5e3d2f', '#93704c', '#735638'] }, { id: 'bamboo', label: '대나무 숲', floor: 0.585, card: ['#5f8a55', '#456b41', '#8f8059', '#706443'] },
+  { id: 'beach', label: '바닷가', floor: 0.56, card: ['#86bbd6', '#62a0c2', '#e0cba2', '#c8b083'] }, { id: 'mountain', label: '산', floor: 0.545, card: ['#86a5be', '#6486a2', '#84936a', '#687652'] }, { id: 'night', label: '밤하늘', floor: 0.605, card: ['#2a3759', '#1b2644', '#454153', '#302d3d'] },
 ];
 const bgUrl = (id, thumb) => `bg/${thumb ? 'thumb-' : ''}${id}.jpg`;
 const KEYS = ['eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen', 'mouthFunnel', 'mouthPucker', 'mouthSmileLeft', 'mouthSmileRight'];
@@ -714,7 +724,10 @@ function place() {
   if ($('#room').hidden) return;
   const W = innerWidth, H = innerHeight, cx = W / 2, view = S.view || 'class';
   const asks = $('#asks'), barTop = (!asks.hidden && asks.getBoundingClientRect().top) || $('#bar').getBoundingClientRect().top || H - 70;
-  const topEnd = $('#top').getBoundingClientRect().bottom;
+  let topEnd = $('#top').getBoundingClientRect().bottom;
+  const shBox = $('#share');
+  const sharing = !shBox.hidden && !shBox.classList.contains('full');
+  if (sharing) { const hh = Math.round((barTop - topEnd) * 0.5); shBox.style.top = `${topEnd + 6}px`; shBox.style.height = `${hh}px`; topEnd += hh + 8; } // 공유 중: 위 절반은 공유 화면, 아래 절반에 사람들
   const host = order.find((m) => m.host), guests = order.filter((m) => !m.host), n = guests.length;
   const put = (mem, x, base, h) => {
     const w = h * 0.86;
@@ -767,7 +780,7 @@ function place() {
   let fF = H * (n <= 3 ? 0.25 : n <= 6 ? 0.21 : n <= 9 ? 0.18 : 0.155);
   const yFront = barTop - 20;
   // 진행자는 바닥선 바로 아래(바닥 위)에 앉는다
-  const hostBase = clamp(floorLine() + H * 0.04, topEnd + H * 0.2, yFront - fF * 0.45);
+  const hostBase = clamp(floorLine() + H * 0.04, topEnd + H * (sharing ? 0.26 : 0.2), yFront - fF * 0.45);
   if (n) fF = Math.min(fF, (yFront - hostBase) / 0.78); // 맨 앞 참가자가 진행자를 많이 가리지 않게
   const hostH = Math.min(fF, hostBase - topEnd - 6); // 진행자도 참가자와 같은 크기
   if (host) put(host, cx, hostBase, hostH);
@@ -919,6 +932,116 @@ const hostPeerId = (code) => PREFIX + code.toLowerCase() + '-host';
 const newCode = () => Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
 const roster = () => [...members.values()].map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, host: m.host, away: m.away, ask: !!m.ask, talk: !!m.talk }));
 const cast = (msg, except) => { for (const [id, c] of S.conns) if (id !== except && c.open) c.send(msg); };
+/* ---------- 화면·파일 공유 (진행자 → 모두) ---------- */
+// 컴퓨터: 화면 통째로 공유. 컴퓨터·폰 공통: PDF와 영상 파일. 무엇을 공유하든 참가자에게는 영상 한 줄기로 보낸다
+const SHR = { stream: null, kind: null, calls: new Map(), pdf: null, page: 1, pages: 0, bmp: null, timer: 0, raf: 0, ac: null, url: null };
+const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
+let pdfLib = null;
+async function loadPdfLib() {
+  if (pdfLib) return pdfLib;
+  const lib = await import(`${PDFJS}pdf.min.mjs`);
+  try { lib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([await (await fetch(`${PDFJS}pdf.worker.min.mjs`)).text()], { type: 'text/javascript' })); }
+  catch (e) { lib.GlobalWorkerOptions.workerSrc = `${PDFJS}pdf.worker.min.mjs`; }
+  return (pdfLib = lib);
+}
+function shareShow(which) { // which: 'video' | 'canvas' | 'file' | null
+  const box = $('#share');
+  $('#shareVideo').hidden = which !== 'video'; $('#shareCanvas').hidden = which !== 'canvas'; $('#shareFile').hidden = which !== 'file';
+  box.hidden = !which; if (!which) box.classList.remove('full');
+  shareTools(); shareFit(); place();
+}
+// 크게 보기: 세로로 든 폰에서 가로로 긴 자료는 옆으로 돌려 화면을 꽉 채운다
+function shareFit() {
+  const box = $('#share'), full = box.classList.contains('full');
+  for (const e of [$('#shareVideo'), $('#shareCanvas'), $('#shareFile')]) {
+    const w = e.videoWidth || e.width || 0, h = e.videoHeight || e.height || 0;
+    const rot = full && !e.hidden && innerHeight > innerWidth * 1.15 && w > h * 1.15;
+    Object.assign(e.style, rot ? { position: 'absolute', left: '50%', top: '50%', width: `${innerHeight}px`, height: `${innerWidth}px`, maxWidth: 'none', maxHeight: 'none', transform: 'translate(-50%,-50%) rotate(90deg)' } : { position: '', left: '', top: '', width: '', height: '', maxWidth: '', maxHeight: '', transform: '' });
+  }
+}
+for (const id of ['#shareVideo', '#shareFile']) { $(id).addEventListener('loadedmetadata', shareFit); $(id).addEventListener('resize', shareFit); }
+function shareTools() {
+  const t = $('#shareTools'); t.replaceChildren();
+  const btn = (text, fn, lab) => { const b = el('button', 'chip', text); b.type = 'button'; if (lab) b.setAttribute('aria-label', lab); b.addEventListener('click', fn); t.append(b); return b; };
+  const full = $('#share').classList.contains('full');
+  if (S.role === 'host' && SHR.kind === 'pdf') { btn('◀', () => pdfGo(SHR.page - 1), '앞 쪽'); t.append(el('span', 'pg', `${SHR.page} / ${SHR.pages}`)); btn('▶', () => pdfGo(SHR.page + 1), '다음 쪽'); }
+  btn(full ? '작게 보기' : '크게 보기', () => { $('#share').classList.toggle('full'); shareTools(); shareFit(); place(); });
+  if (S.role === 'host' && SHR.stream) btn('공유 끝내기', stopShare);
+}
+async function pdfGo(n) {
+  if (!SHR.pdf) return; n = clamp(n, 1, SHR.pages);
+  const page = await SHR.pdf.getPage(n), v0 = page.getViewport({ scale: 1 }), vp = page.getViewport({ scale: Math.min(1600 / v0.width, 1600 / v0.height) });
+  const off = document.createElement('canvas'); off.width = Math.round(vp.width); off.height = Math.round(vp.height);
+  const g = off.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, off.width, off.height);
+  await page.render({ canvasContext: g, viewport: vp }).promise;
+  SHR.page = n; SHR.bmp = off; pdfPaint(); shareTools(); shareFit();
+}
+function pdfPaint() { // 같은 그림이라도 주기적으로 다시 그려야 늦게 들어온 사람에게도 화면이 간다
+  const c = $('#shareCanvas'), b = SHR.bmp; if (!b) return;
+  if (c.width !== b.width || c.height !== b.height) { c.width = b.width; c.height = b.height; }
+  c.getContext('2d').drawImage(b, 0, 0);
+}
+function shareTo(id) {
+  if (!SHR.stream || !S.conns.get(id)?.open) return;
+  SHR.calls.get(id)?.close();
+  const call = S.peer.call(id, SHR.stream, { metadata: { kind: 'share' } }); SHR.calls.set(id, call);
+  // 참가자 수만큼 올려 보내야 하므로 화질 상한을 둔다
+  setTimeout(() => { try { for (const sd of call.peerConnection.getSenders()) if (sd.track && sd.track.kind === 'video') { const pr = sd.getParameters(); if (!pr.encodings || !pr.encodings.length) pr.encodings = [{}]; pr.encodings[0].maxBitrate = 1200000; sd.setParameters(pr).catch(() => {}); } } catch (e) { /* 무시 */ } }, 1500);
+}
+async function startShare(kind, file) {
+  if (S.role !== 'host') return;
+  stopShare(true);
+  try {
+    let stream;
+    if (kind === 'screen') {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: true });
+      const v = $('#shareVideo'); v.muted = true; v.srcObject = stream; v.play().catch(() => {});
+      stream.getVideoTracks()[0].addEventListener('ended', () => stopShare()); shareShow('video');
+    } else if (kind === 'pdf') {
+      say('PDF를 여는 중…');
+      const lib = await loadPdfLib(); SHR.pdf = await lib.getDocument({ data: await file.arrayBuffer() }).promise; SHR.pages = SHR.pdf.numPages; SHR.kind = 'pdf';
+      await pdfGo(1); stream = $('#shareCanvas').captureStream(5); SHR.timer = setInterval(pdfPaint, 700); shareShow('canvas');
+    } else {
+      const v = $('#shareFile'); SHR.url = URL.createObjectURL(file); v.src = SHR.url; v.muted = false;
+      await new Promise((res, rej) => { v.oncanplay = res; v.onerror = () => rej(new Error('video')); });
+      if (v.captureStream && !window.__forceCanvas) { stream = v.captureStream(); }
+      else {
+        // 영상 요소를 바로 내보낼 수 없는 브라우저(아이폰 등): 화면에 그려서 내보내고, 소리는 따로 뽑아 붙인다
+        const c = $('#shareCanvas'), k = Math.min(1, 1280 / v.videoWidth); c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+        const g = c.getContext('2d'), loop = () => { g.drawImage(v, 0, 0, c.width, c.height); SHR.raf = requestAnimationFrame(loop); }; loop();
+        stream = c.captureStream(24);
+        try { SHR.ac = new (window.AudioContext || window.webkitAudioContext)(); const src = SHR.ac.createMediaElementSource(v), dst = SHR.ac.createMediaStreamDestination(); src.connect(dst); src.connect(SHR.ac.destination); const at = dst.stream.getAudioTracks()[0]; if (at) stream.addTrack(at); } catch (e) { console.warn('영상 소리를 내보내지 못했습니다', e); }
+      }
+      shareShow('file'); v.play().catch(() => {});
+    }
+    const vt = stream.getVideoTracks()[0]; if (vt) try { vt.contentHint = kind === 'video' ? 'motion' : 'detail'; } catch (e) { /* 무시 */ }
+    SHR.stream = stream; SHR.kind = kind;
+    cast({ t: 'share', v: true }); for (const id of S.conns.keys()) shareTo(id);
+    shareTools(); toBar(); say(kind === 'screen' ? '화면을 공유하는 중' : kind === 'pdf' ? 'PDF를 공유하는 중 · ◀ ▶ 로 넘깁니다' : '영상을 공유하는 중');
+  } catch (e) {
+    console.warn(e); stopShare(true);
+    if (!(e && e.name === 'NotAllowedError')) say(kind === 'screen' ? '화면을 공유하지 못했습니다' : '파일을 열지 못했습니다. 다른 파일로 해 보세요.', true);
+  }
+}
+function stopShare(quiet) {
+  const was = !!SHR.stream;
+  for (const c of SHR.calls.values()) c.close(); SHR.calls.clear();
+  if (SHR.stream) SHR.stream.getTracks().forEach((t) => t.stop());
+  clearInterval(SHR.timer); cancelAnimationFrame(SHR.raf); try { SHR.ac && SHR.ac.close(); } catch (e) { /* 무시 */ }
+  const f = $('#shareFile'); f.pause(); if (SHR.url) { URL.revokeObjectURL(SHR.url); f.removeAttribute('src'); f.load(); }
+  $('#shareVideo').srcObject = null;
+  Object.assign(SHR, { stream: null, kind: null, pdf: null, bmp: null, timer: 0, raf: 0, ac: null, url: null, page: 1, pages: 0 });
+  if (was) cast({ t: 'share', v: false });
+  shareShow(null); if (was && S.role === 'host' && !S.ended) { toBar(); if (quiet !== true) hostStatus(); }
+}
+// 참가자: 공유 화면 받기
+function showShare(stream) {
+  const v = $('#shareVideo'); v.srcObject = stream; v.muted = false; shareShow('video');
+  const quiet = () => { v.muted = true; v.play().catch(() => {}); $('#unmute').hidden = false; }; // 소리가 막히면 화면부터 보여 주고 '소리 켜기'를 띄운다
+  v.play().catch((e) => { if (e && e.name === 'AbortError') setTimeout(() => { if (v.srcObject === stream) v.play().catch(quiet); }, 300); else quiet(); }); // 자료가 바뀌는 순간에 끊긴 재생은 한 번 더 시도한다
+}
+function hideShare() { $('#shareVideo').srcObject = null; shareShow(null); }
+addEventListener('keydown', (e) => { if (S.role === 'host' && SHR.kind === 'pdf' && !/INPUT|TEXTAREA/.test(e.target.tagName)) { if (e.key === 'ArrowRight' || e.key === 'PageDown') pdfGo(SHR.page + 1); else if (e.key === 'ArrowLeft' || e.key === 'PageUp') pdfGo(SHR.page - 1); } });
 /* ---------- 발언권: 참가자가 요청하면 진행자가 허용한다 (한 번에 한 사람) ---------- */
 // 허용된 참가자의 목소리는 진행자에게 가고, 진행자가 다른 참가자들에게 그대로 전해 준다
 function markTalk(id, key, v) { const mem = members.get(id); if (mem) { mem[key] = !!v; label(mem); } }
@@ -1019,7 +1142,7 @@ const seen = new Map(); let hbTick = performance.now();
 function dropGuest(id) {
   const c = S.conns.get(id); if (!c) return;
   S.conns.delete(id); seen.delete(id); try { c.close(); } catch (e) { /* 무시 */ }
-  S.calls.get(id)?.close(); S.calls.delete(id); S.relays.get(id)?.close(); S.relays.delete(id);
+  S.calls.get(id)?.close(); S.calls.delete(id); S.relays.get(id)?.close(); S.relays.delete(id); SHR.calls.get(id)?.close(); SHR.calls.delete(id);
   if (S.talker === id) setTalker(null);
   removeMember(id); cast({ t: 'leave', id }); renderAsks();
 }
@@ -1048,6 +1171,7 @@ function onHostData(conn, msg) {
     if (!back) { addMember(m, true); cast({ t: 'join', m }, id); }
     if (S.mic) S.calls.set(id, S.peer.call(id, S.mic));
     relayTo(id); // 누가 말하는 중이면 그 목소리도 들려준다
+    if (SHR.stream) { conn.send({ t: 'share', v: true }); shareTo(id); } // 공유 중이면 공유 화면도 보낸다
   } else if (!S.conns.has(id)) return;
   else if (msg.t === 'p' && Array.isArray(msg.k)) { const mem = members.get(id); if (mem) { applyPacket(mem, msg.k, false); mem.raw = msg.k; } }
   else if (msg.t === 'avatar' && knownAvatar(msg.avatar)) { setAvatar(id, msg.avatar); cast({ t: 'avatar', id, avatar: msg.avatar }); }
@@ -1102,7 +1226,7 @@ function joinRoom(code) {
     const lost = () => {
       if (!S.hostConn) return;
       S.hostConn = null;
-      $('#hostAudio').srcObject = null; playTalk(null); stopMyMic(); S.talker = null; toBar();
+      $('#hostAudio').srcObject = null; playTalk(null); hideShare(); stopMyMic(); S.talker = null; toBar();
       say('진행자와 연결이 끊겼습니다. 진행자가 돌아오면 자동으로 다시 연결됩니다', true);
       again(1500);
     };
@@ -1130,6 +1254,7 @@ function joinRoom(code) {
       else if (msg.t === 'cf' || msg.t === 'cd') recvCustom(msg);
       else if (msg.t === 'away') { if (msg.id !== S.myId) setAway(msg.id, !!msg.v); }
       else if (msg.t === 'bg') setBg(msg.bg);
+      else if (msg.t === 'share') { if (!msg.v) hideShare(); }
       else if (msg.t === 'ask') markTalk(msg.id, 'ask', msg.v);
       else if (msg.t === 'talk') onTalk(msg.id, !!msg.v);
       else if (msg.t === 'cfg') { S.awayOn = msg.awayOn !== false; if (!S.awayOn) { lastFace = performance.now(); iAmAway(false); } }
@@ -1152,7 +1277,7 @@ function joinRoom(code) {
       if (!joined) giveUp(`연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요. (${err.type})`);
     });
     peer.on('disconnected', () => { if (alive() && !peer.destroyed) { try { peer.reconnect(); } catch (e) { /* 무시 */ } } });
-    peer.on('call', (call) => { call.answer(); call.on('stream', (st) => (call.metadata && call.metadata.kind === 'relay' ? playTalk(st) : playHost(st))); });
+    peer.on('call', (call) => { call.answer(); call.on('stream', (st) => { const kind = call.metadata && call.metadata.kind; if (kind === 'share') showShare(st); else if (kind === 'relay') playTalk(st); else playHost(st); }); });
     peer.on('open', () => { if (!attempt) knock(); });
   });
 }
@@ -1160,7 +1285,7 @@ function playHost(stream) {
   const a = $('#hostAudio'); a.srcObject = stream;
   a.play().then(() => { $('#unmute').hidden = true; if (!S.away) say('진행자 목소리 연결됨'); }).catch(() => { $('#unmute').hidden = false; });
 }
-$('#unmute').addEventListener('click', () => { if ($('#talkAudio').srcObject) $('#talkAudio').play().catch(() => {}); $('#hostAudio').play().then(() => { $('#unmute').hidden = true; say('진행자 목소리 연결됨'); }).catch(() => {}); });
+$('#unmute').addEventListener('click', () => { const sv = $('#shareVideo'); if (S.role !== 'host' && sv.srcObject) { sv.muted = false; sv.play().catch(() => {}); } if ($('#talkAudio').srcObject) $('#talkAudio').play().catch(() => {}); $('#hostAudio').play().then(() => { $('#unmute').hidden = true; say('진행자 목소리 연결됨'); }).catch(() => {}); });
 
 let lastSend = 0;
 function netTick(now) {
@@ -1182,6 +1307,7 @@ function setBg(id) {
   if (S.bg === id && $('#bg').getAttribute('src')) return;
   S.bg = id;
   $('#bg').src = bgUrl(id);
+  const cc = BGS.find((g) => g.id === id).card; ['--w1', '--w2', '--f1', '--f2'].forEach((k, i) => $('#cards').style.setProperty(k, cc[i]));
   place();
 }
 function toBar() {
@@ -1191,7 +1317,7 @@ function toBar() {
   add(S.camOn ? '카메라 켜짐' : '카메라 꺼짐', S.camOn, toggleCam);
   add('아바타', null, () => openSheet('avatar'));
   if (S.role === 'join') add(S.talker === S.myId ? '발언 마치기' : S.asking ? '요청 취소' : '발언 요청', S.talker === S.myId || S.asking, askTalk);
-  if (S.role === 'host') { add('배경·소리', null, () => openSheet('host')); add('초대', null, invite); }
+  if (S.role === 'host') { add('배경·소리', null, () => openSheet('host')); add(SHR.stream ? '공유 중' : '공유', SHR.stream ? true : null, () => openSheet('share')); add('초대', null, invite); }
   add(S.role === 'host' ? '수업 종료' : '나가기', null, leave, 'danger');
   place();
 }
@@ -1313,6 +1439,16 @@ async function openMaker(after) {
 function openSheet(kind) {
   const sh = $('#sheet'); sh.replaceChildren(); sh.hidden = false;
   const close = el('button', 'chip', '닫기'); close.type = 'button'; close.addEventListener('click', () => { sh.hidden = true; });
+  if (kind === 'share') {
+    sh.append(el('h2', null, '자료 공유'));
+    const row = el('div', 'row'); sh.append(row);
+    const pick = (text, accept, k) => { const b = el('button', 'chip', text), inp = el('input'); b.type = 'button'; inp.type = 'file'; inp.accept = accept; inp.hidden = true; b.addEventListener('click', () => inp.click()); inp.addEventListener('change', () => { const f = inp.files && inp.files[0]; if (!f) return; sh.hidden = true; startShare(k, f).then(toBar); }); row.append(b, inp); };
+    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) { const b = el('button', 'chip', '화면 공유'); b.type = 'button'; b.addEventListener('click', () => { sh.hidden = true; startShare('screen').then(toBar); }); row.append(b); }
+    pick('PDF 열기', 'application/pdf,.pdf', 'pdf'); pick('영상 파일 열기', 'video/*', 'video');
+    if (SHR.stream) { const b = el('button', 'chip', '공유 끝내기'); b.type = 'button'; b.addEventListener('click', () => { sh.hidden = true; stopShare(); toBar(); }); row.append(b); }
+    sh.append(el('p', 'note', (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia ? '' : '이 기기(폰)에서는 화면을 통째로 공유할 수 없어 파일로 공유합니다. ') + 'PPT는 PDF로 저장해서 열거나, 컴퓨터에서 화면 공유로 보여 주세요. 참가자 화면에서는 위 절반에 자료가 보이고, "크게 보기"로 전체 화면이 됩니다.'));
+    sh.append(close); return;
+  }
   if (kind === 'avatar') {
     sh.append(el('h2', null, '내 아바타'));
     const row = el('div', 'row');
@@ -1376,7 +1512,7 @@ function leave() {
 }
 function endClass(msg) {
   if (S.ended) return; S.ended = true;
-  stopCamera(); S.mic?.getTracks().forEach((t) => t.stop()); S.myMic?.getTracks().forEach((t) => t.stop());
+  stopCamera(); S.mic?.getTracks().forEach((t) => t.stop()); S.myMic?.getTracks().forEach((t) => t.stop()); if (S.role === 'host') stopShare(true); else hideShare();
   try { S.peer?.destroy(); } catch (e) { /* 무시 */ }
   wake?.release?.().catch(() => {});
   $('#sheet').hidden = true; $('#unmute').hidden = true;
@@ -1444,7 +1580,7 @@ function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   camera.right = innerWidth; camera.top = innerHeight; camera.updateProjectionMatrix();
 }
-addEventListener('resize', () => { resize(); place(); });
+addEventListener('resize', () => { resize(); shareFit(); place(); });
 const clock = new THREE.Clock();
 function animate(mem, now, dt, t, a) {
   const inst = mem.inst, seat = mem.seat || mem.cur; if (!inst || !seat || !mem.cur) return;
@@ -1501,7 +1637,7 @@ function tick() {
 }
 
 /* ---------- 시작 ---------- */
-window.__cls = { S, members, addMember, removeMember, setAway, setAvatar, setMyPacket, enc, CUSTOM, createCustom, pickAvatar, askTalk, setTalker, setView };
+window.__cls = { S, members, addMember, removeMember, setAway, setAvatar, setMyPacket, enc, CUSTOM, createCustom, pickAvatar, askTalk, setTalker, setView, startShare, stopShare, SHR };
 try { const n = localStorage.getItem('medclass-name'); if (n) $('#name').value = n; const av = localStorage.getItem('medclass-avatar'); if (AVATARS.some((a) => a.id === av)) S.avatar = av; } catch (e) { /* 무시 */ }
 { let v = null; try { v = localStorage.getItem('medclass-view'); } catch (e) { /* 무시 */ } setView(v); }
 loadMine().then((ok) => { if (!ok) return; try { if (localStorage.getItem('medclass-avatar') === S.mine && !S.myId) S.avatar = S.mine; } catch (e) { /* 무시 */ } avatarRow($('#lobbyAv'), lobbyPick); });
